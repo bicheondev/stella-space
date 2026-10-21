@@ -48,3 +48,9 @@ test('root chooses Gangzi when everyone is offline, regardless of the saved memb
  vm.runInContext("rootPending=true;const saved='ShirayukiHina_';api=async()=>response;select=async(name,handle)=>{chosen=handle;rootPending=false}",ctx);
  await vm.runInContext('refresh()',ctx);assert.equal(ctx.chosen,'GANGZIIII');
 });
+
+test('reading older chat disables following until the viewport returns to the bottom',async()=>{
+ const{ctx,elements}=await setup();vm.runInContext("$('messages')",ctx);const box=elements.get('messages');
+ Object.assign(box,{scrollHeight:2000,clientHeight:500,scrollTop:1000});vm.runInContext('updateAutoScroll()',ctx);assert.equal(vm.runInContext('auto',ctx),false);
+ box.scrollTop=1500;vm.runInContext('updateAutoScroll()',ctx);assert.equal(vm.runInContext('auto',ctx),true);
+});
