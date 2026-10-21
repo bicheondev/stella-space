@@ -61,8 +61,8 @@ test('Space discovery excludes a Space older than the latest five own posts',()=
 });
 
 test('adaptive interval reserves profile traffic and grows with live rooms',()=>{
- assert.equal(replyInterval(0),82);assert.equal(replyInterval(1),82);assert.equal(replyInterval(4),328);assert.equal(replyInterval(14),1148);
- for(let n=1;n<=14;n++)assert.ok(n*60000/replyInterval(n)+168<=900);
+ assert.equal(replyInterval(0),84);assert.equal(replyInterval(1),84);assert.equal(replyInterval(4),334);assert.equal(replyInterval(14),1167);
+ for(let n=1;n<=15;n++)assert.ok(n*60000/replyInterval(n)+180<=900);
 });
 test('shared Fx slots stagger workers, bound the queue, and recover after idle',async()=>{
  const{a,b,dbA,dbB}=setup();

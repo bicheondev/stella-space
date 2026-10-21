@@ -43,8 +43,8 @@ test('root auto-selection follows dropdown order rather than response or saved-m
  assert.equal(firstLiveMember(groups,[{handle:'Yuni',status:'offline'}]),null);
 });
 
-test('root chooses Yuni when everyone is offline, regardless of the saved member',async()=>{
- const{ctx}=await setup();ctx.response=[{handle:'AyatsunoYuni',status:'offline'},{handle:'ShirayukiHina_',status:'offline'}];
+test('root chooses Gangzi when everyone is offline, regardless of the saved member',async()=>{
+ const{ctx}=await setup();ctx.response=[{handle:'GANGZIIII',status:'offline'},{handle:'ShirayukiHina_',status:'offline'}];
  vm.runInContext("rootPending=true;const saved='ShirayukiHina_';api=async()=>response;select=async(name,handle)=>{chosen=handle;rootPending=false}",ctx);
- await vm.runInContext('refresh()',ctx);assert.equal(ctx.chosen,'AyatsunoYuni');
+ await vm.runInContext('refresh()',ctx);assert.equal(ctx.chosen,'GANGZIIII');
 });
