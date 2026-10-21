@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {sharedCollect,findSpacePost,replyInterval,reserveFxSlot} from '../worker/index.js';
+import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot} from '../worker/index.js';
 const migration=readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8');
 function binding(sqlite){
  return {
@@ -71,4 +71,20 @@ test('shared Fx slots stagger workers, bound the queue, and recover after idle',
  for(let i=20;i<30;i++)await reserveFxSlot(dbA,1000);
  await assert.rejects(reserveFxSlot(dbB,1000),/예산/);
  assert.equal(await reserveFxSlot(dbB,10000),0);a.close();b.close();
+});
+
+test('ended rooms return stored chat without acquiring a reply lease or fetching Fx',async()=>{
+ const{a,b,dbA}=setup();
+ const put=(key,payload)=>a.prepare('INSERT INTO collector_entries (key,payload,next_poll_at) VALUES (?,?,?)').run(key,JSON.stringify(payload),Date.now()+60000);
+ put('resolve:post:123',{id:'1EndedSpace'});put('space:1EndedSpace',{state:'Ended'});put('replies:fxtwitter:123',{messages:[{id:'reply'}]});
+ const response=await worker.fetch(new Request('https://test/api/replies?id=123'),{DB:dbA});const data=await response.json();
+ assert.equal(data.stopped,true);assert.equal(data.messages[0].id,'reply');assert.equal(a.prepare("SELECT fetch_count FROM collector_entries WHERE key='replies:fxtwitter:123'").get().fetch_count,0);
+ a.close();b.close();
+});
+
+test('reply cadence starts at request time without adding response time',async()=>{
+ const{a,b,dbA}=setup();let now=1000;
+ await sharedCollect(dbA,'cadence',100,async()=>{now=1500;return{messages:[]};},{clock:()=>now,startCadence:true});
+ assert.equal(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='cadence'").get().next_poll_at,1100);
+ a.close();b.close();
 });
