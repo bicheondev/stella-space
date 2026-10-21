@@ -52,3 +52,10 @@ test('member discovery takes the newest own Space post, ignoring reposts and han
  const result=findSpacePost([post('other','someone',500,'https://x.com/i/spaces/1OtherRoom'),post('old','Shirayukihina_',100,'https://x.com/i/spaces/1OldRoom'),post('new','Shirayukihina_',200,'https://x.com/i/spaces/1NewRoom')],'ShirayukiHina_');
  assert.equal(result.post.id,'new');assert.equal(result.space,'1NewRoom');
 });
+
+test('Space discovery excludes a Space older than the latest five own posts',()=>{
+ const posts=Array.from({length:6},(_,i)=>({id:String(i),author:{screen_name:'member'},created_timestamp:100-i,text:i===5?'https://x.com/i/spaces/1OlderSpace':'ordinary post'}));
+ assert.equal(findSpacePost(posts,'member'),null);
+ posts[4].text='https://x.com/i/spaces/1RecentSpace';
+ assert.equal(findSpacePost(posts,'member').post.id,'4');
+});

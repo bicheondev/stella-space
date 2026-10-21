@@ -8,7 +8,7 @@ async function metadata(id){const d=await gql('AudioSpaceById','fYAuJHiY3TmYdBmr
 async function spaceMetadata(id,db){return sharedCollect(db,'space:'+id,m=>m.state==='Running'?15000:60000,()=>metadata(id));}
 function find(value,test){if(!value||typeof value!=='object')return null;if(test(value))return value;for(const v of Object.values(value)){const r=find(v,test);if(r)return r;}return null;}
 export function findSpacePost(posts,handle){
-  return [...posts].filter(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase()).sort((a,b)=>(b.created_timestamp||0)-(a.created_timestamp||0)).map(post=>{
+  return [...posts].filter(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase()).sort((a,b)=>(b.created_timestamp||0)-(a.created_timestamp||0)).slice(0,5).map(post=>{
     const match=(post.text+' '+JSON.stringify(post.raw_text?.facets||[])).match(/https:\/\/(?:x|twitter)\.com\/i\/spaces\/([A-Za-z0-9]+)/);
     return match?{post,space:match[1]}:null;
   }).find(Boolean)||null;
@@ -16,13 +16,13 @@ export function findSpacePost(posts,handle){
 async function profile(handle,db){
   const member=members.flatMap(g=>g[2]).find(m=>m[1].toLowerCase()===handle.toLowerCase());
   if(!member)throw Error('등록되지 않은 멤버입니다.');handle=member[1];
-  const value=await sharedCollect(db,'member:'+handle,5000,async()=>{
-    const d=await json('https://api.fxtwitter.com/2/profile/'+handle+'/statuses?count=20');
+  const value=await sharedCollect(db,'member:v2:'+handle,5000,async()=>{
+    const d=await json('https://api.fxtwitter.com/2/profile/'+handle+'/statuses?count=5');
     if(d.code!==200||!Array.isArray(d.results))throw Error('멤버 최근 게시물 조회 제한');
     const own=d.results.find(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase());
     const avatar=own?.author?.avatar_url;
     const found=findSpacePost(d.results,handle);
-    if(!found)return{handle,avatar,status:'unknown',reason:'최근 게시물에서 Space 링크를 찾지 못했습니다.'};
+    if(!found)return{handle,avatar,status:'offline',reason:'최근 게시물 5개에 Space 공유 글이 없어 오프라인으로 표시합니다.'};
     let m;try{m=await spaceMetadata(found.space,db);}catch{}
     return{handle,avatar,status:m?.state==='Running'?'live':m?.state==='Ended'?'offline':'unknown',state:m?.state||'Unknown',space:found.space,title:m?.title||member[0]+'의 스페이스',postUrl:'https://x.com/'+handle+'/status/'+found.post.id};
   });
