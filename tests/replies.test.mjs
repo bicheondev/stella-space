@@ -13,3 +13,9 @@ test('Fx extraction excludes root, nested replies and unrelated posts',()=>{
 test('reply API validates input before making any network request',async()=>{
  const r=await worker.fetch(new Request('http://localhost/api/replies?id=not-a-tweet&source=fxtwitter'));assert.equal(r.status,502);assert.match((await r.json()).error,/ID/);
 });
+
+test('API work stays attached to the Worker lifetime after a client disconnect',async()=>{
+ const retained=[];
+ const result=await worker.fetch(new Request('http://localhost/api/replies?id=invalid'),{}, {waitUntil:p=>retained.push(p)});
+ assert.equal(result.status,502);assert.equal(retained.length,1);await retained[0];
+});

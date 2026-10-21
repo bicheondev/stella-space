@@ -1,7 +1,7 @@
 const members=[['에버리스','EVERYS',[['아야츠노 유니','AyatsunoYuni'],['사키하네 후야','SakihaneHuya']]],['유니버스','Universe',[['네네코 마시로','NenekoMashiro'],['아라하시 타비','ArahashiTabi'],['시라유키 히나','ShirayukiHina_'],['아카네 리제','AkaneLize']]],['클리셰','Cliché',[['아오쿠모 린','AokumoRin'],['텐코 시부키','TenkoShibuki'],['하나코 나나','HanakoNana_'],['유즈하 리코','YuzuhaRiko']]],['어비스','ABYSS',[['시즈키 토아','ShizukiToa_'],['코가네 랑','CoganeRang'],['하나요 히요리','HanayoHiyori'],['토키노 메리','TokinoMery']]]];
 const bearer='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 let guest,guestAt=0,guestPending;
-async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('X 조회 제한 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
+async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('X 조회 제한 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
 // 10% headroom below the provider's published 1,000 requests/minute.
 const FX_TARGET_RPM=900,PROFILE_RPM=14*60/5,FX_SLOT_MS=Math.ceil(60000/FX_TARGET_RPM);
 export function replyInterval(roomCount){return Math.ceil(60000*Math.max(1,roomCount)/(FX_TARGET_RPM-PROFILE_RPM));}
@@ -72,7 +72,7 @@ async function resolve(input,db){
 // A lease owner alone may fetch or commit. A crashed owner is recoverable after expiry.
 export async function sharedCollect(db,key,ttl,produce,options={}){
   if(!db?.prepare)throw Error('Sites 공유 수집 저장소가 연결되지 않았습니다.');
-  const clock=options.clock||Date.now,now=clock(),leaseMs=options.leaseMs||60000;
+  const clock=options.clock||Date.now,now=clock(),leaseMs=options.leaseMs||25000;
   const read=()=>db.prepare('SELECT * FROM collector_entries WHERE key = ?1').bind(key).first();
   let row=await read();
   const output=(r,collecting=false)=>r?.payload?{...JSON.parse(r.payload),shared:true,collecting,stale:!!r.last_error,warning:r.last_error||null}:{shared:true,collecting:true,messages:[],source:key.startsWith('replies:')?key.split(':')[1]:undefined,checkedAt:null};
@@ -91,7 +91,7 @@ export async function sharedCollect(db,key,ttl,produce,options={}){
       const prior=JSON.parse(acquired.payload),byId=new Map();
       for(const m of [...(prior.messages||[]),...(value.messages||[])])byId.set(m.id,m);
       const messages=[...byId.values()].sort((a,b)=>a.time-b.time).slice(-500);
-      while(messages.length>1&&JSON.stringify(messages).length>900000)messages.shift();
+      let size=2,start=messages.length;while(start>0){const length=JSON.stringify(messages[start-1]).length+1;if(size+length>900000)break;size+=length;start--;}if(start)messages.splice(0,start);
       value={...value,messages};
     }
     const checkedAt=new Date(clock()).toISOString();value={...value,checkedAt};
@@ -130,9 +130,9 @@ async function replies(id,db){
   const result=await sharedCollect(db,'replies:fxtwitter:'+id,schedule.pollIntervalMs,async()=>parseFxReplies(await fxJson(db,'https://api.fxtwitter.com/2/conversation/'+id+'?ranking_mode=recency'),id),{mergeMessages:true,startCadence:true});
   return {...result,...schedule};
 }
-export default{async fetch(request,env={}){
+export default{async fetch(request,env={},ctx){
   const u=new URL(request.url);
-  if(u.pathname.startsWith('/api/')){try{
+  if(u.pathname.startsWith('/api/')){const task=(async()=>{try{
     let d;
     if(u.pathname==='/api/members')d=await Promise.all(members.flatMap(g=>g[2]).map(async m=>{try{return await profile(m[1],env.DB);}catch(e){return{handle:m[1],status:'unknown',error:e.message};}}));
     else if(u.pathname==='/api/member')d=await profile(u.searchParams.get('handle')||'',env.DB);
@@ -140,7 +140,7 @@ export default{async fetch(request,env={}){
     else if(u.pathname==='/api/resolve')d=await resolve(u.searchParams.get('url')||'',env.DB);
     else return new Response('Not found',{status:404});
     return Response.json(d,{headers:{'Cache-Control':'no-store'}});
-  }catch(e){return Response.json({error:e.message},{status:502});}}
+  }catch(e){return Response.json({error:e.message},{status:502,headers:{'Cache-Control':'no-store'}});}})();ctx?.waitUntil(task.then(()=>{}));return task;}
   return new Response(html,{headers:{'content-type':'text/html;charset=utf-8'}});
 }};
 const html=`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>스페이스 채팅 · 스텔라이브</title><style>

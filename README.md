@@ -68,3 +68,5 @@ node scripts/validate-artifact.mjs
 답글 수집과 화면 폴링은 요청 시작 시각을 기준으로 다음 간격을 계산합니다. 응답 시간이 주기보다 길면 중복 요청 없이 응답 직후 다음 조회를 시작합니다. 외부 API 응답 지연과 원본 갱신 주기는 별도입니다.
 
 라이브 멤버 프로필은 보라색 링과 Space 배지를 표시합니다. 배지 SVG 원본: https://abs.twimg.com/x-web/x-web/assets/icon-spaces-fill-dkNkOItq.js (X 공개 웹 리소스).
+
+API 수집 요청은 Workers waitUntil로 실행 수명을 유지합니다. 외부 요청 제한 시간은 10초이며, 중단된 수집 잠금은 25초 후 복구합니다. 답글 기록 크기는 메시지별 누적 크기로 제한해 반복적인 전체 직렬화를 피합니다.
