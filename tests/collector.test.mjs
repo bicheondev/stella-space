@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {sharedCollect,findSpacePost} from '../worker/index.js';
+import {sharedCollect,findSpacePost,replyInterval,reserveFxSlot} from '../worker/index.js';
 const migration=readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8');
 function binding(sqlite){
  return {
@@ -58,4 +58,17 @@ test('Space discovery excludes a Space older than the latest five own posts',()=
  assert.equal(findSpacePost(posts,'member'),null);
  posts[4].text='https://x.com/i/spaces/1RecentSpace';
  assert.equal(findSpacePost(posts,'member').post.id,'4');
+});
+
+test('adaptive interval reserves profile traffic and grows with live rooms',()=>{
+ assert.equal(replyInterval(0),82);assert.equal(replyInterval(1),82);assert.equal(replyInterval(4),328);assert.equal(replyInterval(14),1148);
+ for(let n=1;n<=14;n++)assert.ok(n*60000/replyInterval(n)+168<=900);
+});
+test('shared Fx slots stagger workers, bound the queue, and recover after idle',async()=>{
+ const{a,b,dbA,dbB}=setup();
+ const delays=await Promise.all(Array.from({length:20},(_,i)=>reserveFxSlot(i%2?dbA:dbB,1000)));
+ assert.equal(new Set(delays).size,20);assert.deepEqual([...delays].sort((x,y)=>x-y),Array.from({length:20},(_,i)=>i*67));
+ for(let i=20;i<30;i++)await reserveFxSlot(dbA,1000);
+ await assert.rejects(reserveFxSlot(dbB,1000),/예산/);
+ assert.equal(await reserveFxSlot(dbB,10000),0);a.close();b.close();
 });
