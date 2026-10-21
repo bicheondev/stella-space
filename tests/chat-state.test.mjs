@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import worker,{parseFxReplies,memberFromPath} from '../worker/index.js';
+import worker,{parseFxReplies,memberFromPath,firstLiveMember} from '../worker/index.js';
 async function setup(){
  const html=await(await worker.fetch(new Request('https://test/'))).text();
  const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -34,4 +34,17 @@ test('member paths normalize handles and reject unrelated or malformed paths',()
  const groups=[['group','name',[['히나','ShirayukiHina_']]]];
  assert.equal(memberFromPath('/shirayukihina_/',groups),'ShirayukiHina_');
  assert.equal(memberFromPath('/unknown',groups),null);assert.equal(memberFromPath('/%zz',groups),null);
+});
+
+test('root auto-selection follows dropdown order rather than response or saved-member order',()=>{
+ const groups=[['one','one',[['유니','Yuni'],['후야','Huya']]],['two','two',[['히나','Hina']]]];
+ assert.equal(firstLiveMember(groups,[{handle:'Hina',status:'live'},{handle:'Huya',status:'live'},{handle:'Yuni',status:'offline'}]),'Huya');
+ assert.equal(firstLiveMember(groups,[{handle:'Yuni',status:'live',stale:true},{handle:'Hina',status:'live'}]),'Hina');
+ assert.equal(firstLiveMember(groups,[{handle:'Yuni',status:'offline'}]),null);
+});
+
+test('root chooses Yuni when everyone is offline, regardless of the saved member',async()=>{
+ const{ctx}=await setup();ctx.response=[{handle:'AyatsunoYuni',status:'offline'},{handle:'ShirayukiHina_',status:'offline'}];
+ vm.runInContext("rootPending=true;const saved='ShirayukiHina_';api=async()=>response;select=async(name,handle)=>{chosen=handle;rootPending=false}",ctx);
+ await vm.runInContext('refresh()',ctx);assert.equal(ctx.chosen,'AyatsunoYuni');
 });
