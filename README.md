@@ -66,3 +66,5 @@ node scripts/validate-artifact.mjs
 종료된 Space는 저장된 답글만 반환하며 FxTwitter 답글 조회와 브라우저 답글 폴링을 중지합니다. 멤버 상태 확인은 새 Space 발견을 위해 계속합니다.
 
 답글 수집과 화면 폴링은 요청 시작 시각을 기준으로 다음 간격을 계산합니다. 응답 시간이 주기보다 길면 중복 요청 없이 응답 직후 다음 조회를 시작합니다. 외부 API 응답 지연과 원본 갱신 주기는 별도입니다.
+
+라이브 멤버 프로필은 보라색 링과 Space 배지를 표시합니다. 배지 SVG 원본: https://abs.twimg.com/x-web/x-web/assets/icon-spaces-fill-dkNkOItq.js (X 공개 웹 리소스).
