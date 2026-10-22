@@ -1,7 +1,7 @@
 const members=[['','',[['강지','GANGZIIII']]],['에버리스','EVERYS',[['아야츠노 유니','AyatsunoYuni'],['사키하네 후야','SakihaneHuya']]],['유니버스','UNIVERSE',[['네네코 마시로','NenekoMashiro'],['아라하시 타비','ArahashiTabi'],['시라유키 히나','ShirayukiHina_'],['아카네 리제','AkaneLize']]],['클리셰','CLICHÉ',[['아오쿠모 린','AokumoRin'],['텐코 시부키','TenkoShibuki'],['하나코 나나','HanakoNana_'],['유즈하 리코','YuzuhaRiko']]],['어비스','ABYSS',[['시즈키 토아','ShizukiToa_'],['코가네 랑','CoganeRang'],['하나요 히요리','HanayoHiyori'],['토키노 메리','TokinoMery']]]];
 const bearer='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 let guest,guestAt=0,guestPending;
-async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('X 조회 제한 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
+async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('외부 조회 오류 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
 // 10% headroom below the provider's published 1,000 requests/minute.
 const FX_TARGET_RPM=900,PROFILE_RPM=members.flatMap(g=>g[2]).length*60/5,FX_SLOT_MS=Math.ceil(60000/FX_TARGET_RPM);
 export function replyInterval(roomCount){return Math.ceil(60000*Math.max(1,roomCount)/(FX_TARGET_RPM-PROFILE_RPM));}

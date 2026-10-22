@@ -63,3 +63,13 @@ test('live log updates announce only new errors and real chat changes, and prese
  response={...base,now:base.now+2000,sessions:[{...base.sessions[0],messages:5}],errors:[{id:1,at:base.now+1000,key:'replies:fxtwitter:123',error:'429 <script>bad</script>'}]};await vm.runInContext('load()',ctx);assert.equal(get('logNotification').hidden,false);assert(get('collectionActivity').textContent.includes('3개'));assert(get('errorsTable').innerHTML.includes('조회 요청이 잠시 몰렸어요'));assert(get('errorsTable').innerHTML.includes('&lt;script&gt;bad&lt;/script&gt;'));assert(!get('errorsTable').innerHTML.includes('<script>bad'));
  fail=true;await vm.runInContext('load()',ctx);assert.equal(get('globalError').hidden,false);assert(get('logLiveBadge').innerHTML.includes('연결 지연'));assert.equal(get('storedMessages').textContent,'5');assert(timers.includes(2000));assert(timers.includes(1000));
 });
+
+test('HTTP status takes precedence over misleading legacy error labels',()=>{
+ const html=readFileSync(new URL('../server/operations.html',import.meta.url),'utf8');
+ const fn=html.match(/function friendlyIssue\(error\)\{[^\n]+/)[0];
+ const issue=vm.runInNewContext('('+fn+')');
+ for(const [code,title]of [[404,'요청한 정보를 찾지 못했어요'],[410,'요청한 정보를 찾지 못했어요'],[401,'정보 제공처가 조회를 허용하지 않았어요'],[403,'정보 제공처가 조회를 허용하지 않았어요'],[429,'조회 요청이 잠시 몰렸어요'],[500,'정보 제공처와 연결이 원활하지 않아요'],[502,'정보 제공처와 연결이 원활하지 않아요'],[503,'정보 제공처와 연결이 원활하지 않아요'],[408,'응답을 기다리다 시간이 지났어요'],[504,'응답을 기다리다 시간이 지났어요'],[400,'조회 요청을 처리하지 못했어요']])assert.equal(issue('X 조회 제한 ('+code+') · /profile')[0],title);
+ assert.equal(issue('공유 호출 예산 대기 중')[0],'조회 차례를 기다리고 있어요');
+ assert.equal(issue('보조 게시물 조회 대기 중')[0],'조회 차례를 기다리고 있어요');
+ assert.equal(issue('조회 제한')[0],'조회가 일시적으로 제한됐어요');
+});
