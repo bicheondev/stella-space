@@ -1,3 +1,4 @@
+import {receiveFeedback,feedbackAdmin} from './feedback.js';
 import {webPushControl,saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
 import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
@@ -20,6 +21,11 @@ export async function operations(req,url,db){
   return new Response((await initialPage(db,'/GANGZIIII')).replace('</html>','<script>'+debugChatScript+'</script></html>'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer'}});
  }
  if(secret&&url.pathname==='/ops-'+secret){return new Response(page.replace('__DEBUG_PATH__','/ops-'+secret+'/debug'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
+ if(url.pathname==='/api/feedback')return receiveFeedback(req,url,db);
+ if(url.pathname==='/api/admin/feedback'||url.pathname==='/api/admin/feedback/retry'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  return feedbackAdmin(req,url,db);
+ }
  if(url.pathname==='/api/visit')return json({error:'Removed'},410);
  if(url.pathname==='/api/admin/test-chats'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
