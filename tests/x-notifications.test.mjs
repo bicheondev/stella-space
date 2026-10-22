@@ -26,12 +26,12 @@ test('notification credentials and ingestion require the background collector se
 });
 test('only registered authors and original posts leave the notification inbox',()=>{
  const data={globalObjects:{users:{one:{screen_name:'HanayoHiyori'},two:{screen_name:'unrelated'}},tweets:{'123':{user_id_str:'one',full_text:'Space https://t.co/abc',entities:{urls:[{url:'https://t.co/abc',expanded_url:'https://x.com/i/spaces/abcdef123'}]}},'124':{user_id_str:'two',text:'private unrelated'},'125':{user_id_str:'one',text:'RT',retweeted_status_id_str:'999'}}}};
- const posts=notificationPosts(data);assert.equal(posts.length,1);assert(posts[0].text.includes('/i/spaces/abcdef123'));assert(!JSON.stringify(posts).includes('private unrelated'));assert.throws(()=>notificationPosts({}));assert(notificationFrame({topic:'notification:12345'}));assert(!notificationFrame({topic:'/dm_update/123'}));
+ const posts=notificationPosts(data);assert.equal(posts.length,1);assert(posts[0].text.includes('/i/spaces/abcdef123'));assert(!JSON.stringify(posts).includes('private unrelated'));assert.deepEqual(notificationPosts({globalObjects:{},timeline:{}}),[]);assert.throws(()=>notificationPosts({}));assert(notificationFrame({topic:'notification:12345'}));assert(!notificationFrame({topic:'/dm_update/123'}));
 });
-test('ingestion deduplicates notifications and only a confirmed live push enables slow fallback',async()=>{
+test('ingestion deduplicates notifications and only a successful recent notification scan enables slow fallback',async()=>{
  const{sqlite,db}=fixture();try{const post={id:'123',text:'Space https://x.com/i/spaces/abcdef123',author:{screen_name:'HANAYOHIYORI'}};
  assert.equal(await ingestNotificationPosts(db,[post,{...post,id:'456',author:{screen_name:'unrelated'}}]),1);await ingestNotificationPosts(db,[post]);const saved=JSON.parse(sqlite.prepare("SELECT payload FROM collector_entries WHERE key='notification-posts:HanayoHiyori'").get().payload);assert.equal(saved.posts.length,1);
- await receiveNotificationEvent(db,{mode:'connecting'});assert.equal((await notificationStatus(db)).healthy,false);await receiveNotificationEvent(db,{mode:'polling'});assert.equal((await notificationStatus(db)).healthy,false);await receiveNotificationEvent(db,{mode:'push',lastPushAt:Date.now()});assert.equal((await notificationStatus(db)).healthy,true);
+ await receiveNotificationEvent(db,{mode:'connecting'});assert.equal((await notificationStatus(db)).healthy,false);await receiveNotificationEvent(db,{mode:'polling'});assert.equal((await notificationStatus(db)).healthy,false);await receiveNotificationEvent(db,{mode:'polling',lastScanAt:Date.now()});assert.equal((await notificationStatus(db)).healthy,true);await receiveNotificationEvent(db,{mode:'push',lastPushAt:Date.now(),lastScanAt:Date.now()});assert.equal((await notificationStatus(db)).healthy,true);
  await receiveNotificationEvent(db,{mode:'error'});assert.equal((await notificationStatus(db)).healthy,false);
  }finally{sqlite.close()}
 });

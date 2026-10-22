@@ -89,10 +89,10 @@ export async function ingestNotificationPosts(db,posts){
 }
 async function discoverTimeline(db,handle){
  let prior,errors=[];
- const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode')='push' ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind().first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
+ const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind().first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
  const pushed=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('notification-posts:'+handle).first();let notificationPosts=[];try{notificationPosts=JSON.parse(pushed?.payload||'{}').posts||[]}catch{}
- const cached=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('timeline:fx:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
- if(watcher.mode==='push'&&Date.now()-Number(watcher.checkedAtMs||0)<60000&&timeline&&Date.now()-Date.parse(timeline.checkedAt)<60000)return{posts:[...notificationPosts,...timeline.posts],source:'x-notifications',fresh:true};
+ const cached=await db.prepare("SELECT payload FROM collector_entries WHERE key IN (?1,?2) AND payload IS NOT NULL ORDER BY json_extract(payload,'$.checkedAt') DESC LIMIT 1").bind('timeline:fx:'+handle,'timeline:carry:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
+ if(['push','polling'].includes(watcher.mode)&&Date.now()-Number(watcher.lastScanAt||0)<45000&&timeline&&Date.now()-Date.parse(timeline.checkedAt)<60000)return{posts:[...notificationPosts,...timeline.posts],source:'x-notifications',fresh:true};
  for(const source of ['fx','carry']){
   try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,posts:[...notificationPosts,...feed.posts],fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
  }
