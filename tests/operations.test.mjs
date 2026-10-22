@@ -152,3 +152,11 @@ test('test chat deletion requires admin origin and preserves member and unknown 
  assert.deepEqual((await client.execute('SELECT post_id FROM broadcast_messages ORDER BY post_id')).rows.map(r=>r.post_id),['23456','34567']);
  }finally{client.close()}
 });
+
+test('debug latency displays mean and standard deviation and resets empty measurements',()=>{
+ const html=readFileSync(new URL('../server/debug.html',import.meta.url),'utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+ const elements=new Map(['chatLatency','latencyDetail'].map(id=>[id,{textContent:''}]));const ctx=vm.createContext({document:{getElementById:id=>elements.get(id)}});
+ const start=script.indexOf('const $=');vm.runInContext(script.slice(start,script.indexOf('function updateClock')),ctx);
+ vm.runInContext('latencySamples=[100,300];renderLatency()',ctx);assert.equal(elements.get('chatLatency').textContent,'0.200초 ± 0.100초');assert.match(elements.get('latencyDetail').textContent,/2회 측정/);
+ vm.runInContext('latencySamples=[];renderLatency()',ctx);assert.equal(elements.get('chatLatency').textContent,'—');
+});
