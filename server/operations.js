@@ -1,6 +1,9 @@
 import {webPushControl,saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
 import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
+import {initialPage} from '../worker/index.js';
+import {debugChatScript} from './debug-chat.js';
+const debugPage=readFileSync(new URL('./debug.html',import.meta.url),'utf8');
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
 const page=readFileSync(new URL('./operations.html',import.meta.url),'utf8');
 import {createHmac,timingSafeEqual} from 'node:crypto';
@@ -10,7 +13,13 @@ const equal=(a,b)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.
 export function authorized(cookie=''){return !!process.env.OPERATIONS_SECRET&&equal(cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('ops='))?.slice(4)||'',hash('admin'));}
 export async function operations(req,url,db){
  const secret=process.env.OPERATIONS_SECRET?.trim();
- if(secret&&url.pathname==='/ops-'+secret){return new Response(page,{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
+ if(secret&&url.pathname==='/ops-'+secret+'/debug')return new Response(debugPage,{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});
+ if(url.pathname==='/api/admin/debug-chat'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(req.method!=='GET')return json({},405);
+  return new Response((await initialPage(db,'/GANGZIIII')).replace('</html>','<script>'+debugChatScript+'</script></html>'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer'}});
+ }
+ if(secret&&url.pathname==='/ops-'+secret){return new Response(page.replace('__DEBUG_PATH__','/ops-'+secret+'/debug'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
  if(url.pathname==='/api/visit')return json({error:'Removed'},410);
  if(url.pathname==='/api/admin/errors'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);

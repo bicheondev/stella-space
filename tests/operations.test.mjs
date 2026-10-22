@@ -112,3 +112,12 @@ test('error history deletion is admin-only, same-origin and bounded so newer err
  assert.equal((await client.execute('SELECT * FROM collector_errors')).rows[0].error,'new');assert.equal((await client.execute('SELECT last_error FROM collector_entries')).rows[0].last_error,'active failure');
  }finally{client.close()}
 });
+
+test('debug chat requires operations authentication and reuses service chat without analytics',async()=>{
+ process.env.OPERATIONS_SECRET='test-private-secret';const {client,db}=await fixture();try{
+ assert.equal((await operations({method:'GET',headers:{}},url('/api/admin/debug-chat'),db)).status,404);
+ const page=await operations({headers:{}},url('/ops-test-private-secret/debug'),null);assert.equal(page.status,200);assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');
+ const cookie=page.headers.get('set-cookie').split(';')[0],html=await page.text();assert(html.includes('Space 온라인 / 오프라인 감지'));assert(html.includes('Space 채팅 수집 감지'));assert(html.includes("e.source!==$('chat').contentWindow"));new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+ const chat=await operations({method:'GET',headers:{cookie}},url('/api/admin/debug-chat'),db),body=await chat.text();assert(body.includes('채팅방에 오신 것을 환영합니다!'));assert(body.includes('Space 또는 공유 게시물 URL 테스트'));assert(body.includes('event.source!==parent'));assert(!body.includes('googletagmanager'));for(const script of body.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
+ }finally{client.close()}
+});
