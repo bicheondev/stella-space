@@ -286,6 +286,31 @@ html[data-theme="light"] .resume-chat{background:#eff3f4;color:#0f1419;box-shado
 html[data-theme="light"] .message b,html[data-theme="light"] .resume-chat b{color:color-mix(in srgb,var(--nick-color) 65%,#000)}
 html[data-theme="light"] .avatar-live{box-shadow:0 0 0 2px #fff,0 0 0 4px #7856ff}html[data-theme="light"] .space-badge{box-shadow:0 0 0 2px #fff}
 body.hide-chat-images .message-media{display:none!important}
+
+/* Compact chat surfaces, using X web colors and control shapes. */
+:root{--muted:#71767b;--border:#2f3336;--surface:#000;--hover:rgba(231,233,234,.08);--menu-shadow:0 0 15px rgba(255,255,255,.16),0 0 3px 1px rgba(255,255,255,.08)}
+html[data-theme="light"]{--muted:#536471;--border:#eff3f4;--surface:#fff;--hover:rgba(15,20,25,.04);--menu-shadow:0 0 15px rgba(101,119,134,.2),0 0 3px 1px rgba(101,119,134,.15)}
+.selector{padding:0 8px;border-bottom-color:var(--border)}
+.choose{min-height:60px;padding:8px 10px;gap:10px;border-radius:16px;transition:background-color .15s ease}
+.choose .avatar{margin:2px}.identity strong{font-size:14px;line-height:20px}.choose .identity small{font-size:12px;line-height:16px;margin-top:0}
+.windowtop{min-height:48px;padding:6px 12px;gap:6px;flex-shrink:0;background:var(--bg);border-bottom-color:var(--border)}
+.windowtop h1{font-size:14px;line-height:18px;letter-spacing:-.2px}.chat-heading{gap:2px}.audience{font-size:11px;line-height:14px}
+.zoom-controls .iconbtn{width:26px;height:26px}.zoom-controls #zoomlevel{font-size:11px;min-width:30px}.windowtop #gear{width:28px;height:28px}
+.iconbtn{border-radius:999px;transition:background-color .15s ease,color .15s ease}
+.iconbtn:hover,.zoom-controls #zoomout:hover,.zoom-controls #zoomin:hover,html[data-theme="light"] .iconbtn:hover{background:rgba(29,155,240,.1);color:#1d9bf0}
+.choose .identity small,.identity small,.chevron,.group,.audience,.zoom-controls .iconbtn,.zoom-controls #zoomlevel,.windowtop #gear,.message time,.notice,.welcome,.streamtop,.stream small,.pill{color:var(--muted)}
+.dropdown,html[data-theme="light"] .dropdown{padding:4px 0;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--menu-shadow)}
+.group{padding:14px 16px 6px;font-size:11px;letter-spacing:.4px;font-weight:700}.member{padding:10px 14px;border-radius:0;min-height:54px}.member strong{font-size:13px}.member small{font-size:11px}.member:hover,.member.active,html[data-theme="light"] .member:hover,html[data-theme="light"] .member.active{background:var(--hover)}
+.settings,html[data-theme="light"] .settings{top:124px;padding:0;gap:0;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:var(--menu-shadow);overflow:hidden}
+.settings h2{font-size:14px;font-weight:700;padding:14px 16px 10px;margin:0;border-bottom:1px solid var(--border)}
+.settings label,html[data-theme="light"] .settings label{padding:12px 16px;min-height:46px;font-size:13px;color:var(--text);cursor:pointer}.settings label:hover{background:var(--hover)}.settings input{width:17px;height:17px;margin:0;flex-shrink:0;accent-color:#1d9bf0}
+.messages{padding:8px 10px 10px;scrollbar-color:var(--muted) transparent}.welcome{padding:6px 6px;font-size:12px;color:var(--muted)}.notice{font-size:12px;color:var(--muted)}.message{border-radius:8px}.message b{font-weight:600}.message-media img{border:1px solid var(--border);border-radius:12px}
+.tools,html[data-theme="light"] .tools{border-top:1px solid var(--border);min-height:38px;height:38px;padding:3px 8px}.tools .iconbtn{width:28px;height:28px;color:var(--muted)}
+.stream,html[data-theme="light"] .stream{background:var(--surface);border-bottom-color:var(--border);padding:10px 16px}.stream h2{font-size:14px;line-height:20px;margin:5px 0 0}
+.resume-chat,html[data-theme="light"] .resume-chat{bottom:48px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--menu-shadow)}
+html[data-theme="light"] .choose{border-color:#cfd9de}
+@media(max-width:360px){.windowtop{padding:6px 10px;gap:4px}.zoom-controls{gap:1px}.windowtop h1{font-size:14px}}
+@media(prefers-reduced-motion:reduce){.iconbtn,.choose{transition:none}}
 </style><main><section class="chatwindow" aria-label="스페이스 채팅">
 <div class="selector"><button class="choose" id="choose" aria-expanded="false" aria-controls="dropdown"><span id="selectedAvatar" class="avatar">강</span><span class="identity"><strong id="selectedName">강지</strong><small id="selectedHandle">@GANGZIIII</small></span><span class="status unknown" id="selectedStatus">확인 중</span><svg class="chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="m5 7 5 5 5-5 1.4 1.4L10 14.8 3.6 8.4z"/></svg></button><div id="dropdown" class="dropdown" hidden></div></div>
 <div class="windowtop"><div class="chat-heading"><h1>스페이스 채팅</h1><span id="audience" class="audience" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6" r="3.5"/><path d="M2 18v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg><span id="audienceCount"></span><span id="audienceElapsed" hidden></span></span></div><div class="zoom-controls"><button class="iconbtn" id="zoomout" aria-label="채팅 글자 축소" title="채팅 글자 축소">−</button><span id="zoomlevel">100%</span><button class="iconbtn" id="zoomin" aria-label="채팅 글자 확대" title="채팅 글자 확대">+</button></div><button class="iconbtn" id="gear" title="채팅 설정" aria-label="채팅 설정" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.4"/><circle cx="10" cy="10" r="1.4"/><circle cx="10" cy="16" r="1.4"/></svg></button></div>
