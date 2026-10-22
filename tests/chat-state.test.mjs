@@ -99,3 +99,15 @@ test('theme and image preferences persist and preserve the current following sta
  ctx.matchMedia=()=>({matches:false});vm.runInContext("$('showImages').checked=true;auto=true;applyChatPreferences()",ctx);
  assert.equal(ctx.document.documentElement.dataset.theme,'dark');assert(!classes.has('hide-chat-images'));assert.equal(box.scrollTop,1500);
 });
+
+test('avatars retain the last loaded photo, avoid same-URL reloads and ignore stale image completion',async()=>{
+ const{ctx}=await setup(),requests=[];ctx.Image=class{set src(value){this.url=value;requests.push(this)}cloneNode(){return{src:this.url,replaceWith(){}}}};
+ ctx.avatarTarget={children:[],replaceChildren(){this.children=[]},append(x){this.children.push(x)}};
+ const a='https://pbs.twimg.com/profile_images/1/a.jpg',b='https://pbs.twimg.com/profile_images/2/b.jpg';ctx.photoA=a;ctx.photoB=b;
+ vm.runInContext("avatar(avatarTarget,'강지',photoA,false,'GANGZIIII')",ctx);assert.equal(requests.length,1);assert.equal(ctx.avatarTarget.textContent,undefined);
+ requests[0].onload();await Promise.resolve();assert.equal(ctx.avatarTarget._avatarUrl,a);
+ vm.runInContext("avatar(avatarTarget,'강지',photoA,false,'GANGZIIII')",ctx);assert.equal(requests.length,1);
+ vm.runInContext("avatar(avatarTarget,'강지',photoB,false,'GANGZIIII')",ctx);assert.equal(ctx.avatarTarget._avatarUrl,a);requests[1].onerror();await Promise.resolve();await Promise.resolve();assert.equal(ctx.avatarTarget._avatarUrl,a);
+ vm.runInContext("avatar(avatarTarget,'강지',photoB,false,'GANGZIIII')",ctx);requests[2].onload();await Promise.resolve();assert.equal(ctx.avatarTarget._avatarUrl,b);assert.equal(vm.runInContext("JSON.parse(localStorage.getItem('chatAvatarUrls')).GANGZIIII",ctx),b);
+ vm.runInContext("avatar(avatarTarget,'다른 멤버',null,false,'Other')",ctx);assert.equal(ctx.avatarTarget._avatarUrl,null);assert.equal(ctx.avatarTarget.children.length,0);
+});
