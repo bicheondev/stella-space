@@ -77,3 +77,9 @@ test('chat arrival animates upward movement, respects disabled motion and preser
  box.scrollTop=100;vm.runInContext("auto=false;$('disableAnimation').checked=false;animateChatArrival(new Map([[oldMessage,100]]),[newMessage])",ctx);assert.equal(box.scrollTop,100);assert.equal(calls.length,2);
  ctx.matchMedia=()=>({matches:true});vm.runInContext('auto=true;animateChatArrival(new Map([[oldMessage,100]]),[newMessage])',ctx);assert.equal(calls.length,2);
 });
+
+test('timestamp layout changes keep following enabled and do not jump readers to the bottom',async()=>{
+ const {ctx,elements}=await setup();const box={scrollHeight:1200,scrollTop:500,querySelectorAll:()=>[]};elements.set('messages',box);ctx.document.querySelectorAll=()=>[{hidden:true},{hidden:true}];
+ vm.runInContext("$('timestamps').checked=true;auto=true;updateTimestampVisibility()",ctx);assert.equal(box.scrollTop,1200);assert.equal(vm.runInContext('auto',ctx),true);
+ box.scrollTop=250;vm.runInContext("auto=false;$('timestamps').checked=false;updateTimestampVisibility()",ctx);assert.equal(box.scrollTop,250);assert.equal(vm.runInContext('auto',ctx),false);
+});
