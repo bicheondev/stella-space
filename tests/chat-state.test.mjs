@@ -68,3 +68,12 @@ test('an unregistered Space creator replaces the previous selection and live ava
  vm.runInContext('api=async()=>response',ctx);await vm.runInContext("connect('https://x.com/i/spaces/externalroom')",ctx);
  assert.equal(vm.runInContext('selected',ctx),'Sikha__Patel');assert.equal(vm.runInContext('statuses[selected].status',ctx),'live');assert.equal(vm.runInContext('statuses[selected].avatar',ctx),ctx.response.avatar);assert.equal(elements.get('selectedName').textContent,'Sikha__Patel');assert.match(elements.get('connection').textContent,/공유 게시물 미발견/);
 });
+
+test('chat arrival animates upward movement, respects disabled motion and preserves reader position',async()=>{
+ const {ctx,elements}=await setup();const calls=[];ctx.oldMessage={getBoundingClientRect:()=>({top:80}),getAnimations:()=>[],animate:(frames,opts)=>calls.push({frames,opts})};ctx.newMessage={animate:(frames,opts)=>calls.push({frames,opts})};
+ const box=elements.get('messages')||{};elements.set('messages',box);box.scrollHeight=900;box.scrollTop=100;
+ vm.runInContext("animateChatArrival(new Map([[oldMessage,100]]),[newMessage])",ctx);assert.equal(box.scrollTop,900);assert.equal(calls.length,2);assert.equal(calls[0].frames[0].transform,'translateY(20px)');
+ vm.runInContext("$('disableAnimation').checked=true;animateChatArrival(new Map([[oldMessage,100]]),[newMessage])",ctx);assert.equal(calls.length,2);
+ box.scrollTop=100;vm.runInContext("auto=false;$('disableAnimation').checked=false;animateChatArrival(new Map([[oldMessage,100]]),[newMessage])",ctx);assert.equal(box.scrollTop,100);assert.equal(calls.length,2);
+ ctx.matchMedia=()=>({matches:true});vm.runInContext('auto=true;animateChatArrival(new Map([[oldMessage,100]]),[newMessage])',ctx);assert.equal(calls.length,2);
+});
