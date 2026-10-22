@@ -1,13 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import worker,{parseFxReplies,memberFromPath,firstLiveMember} from '../worker/index.js';
+import worker,{parseFxReplies,memberFromPath,firstLiveMember,initialPage} from '../worker/index.js';
 async function setup(){
  const html=await(await worker.fetch(new Request('https://test/'))).text();
  const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
  new vm.Script(script);
  const elements=new Map(),element=()=>({textContent:'',value:'',className:'',hidden:false,children:[],style:{setProperty(){}},append(...x){this.children.push(...x);},replaceChildren(){this.children=[];},setAttribute(){},querySelector(){return null;}});
- const storage=new Map(),urls=[];const ctx=vm.createContext({URL,Intl,Date,Set,Image:class{},localStorage:{setItem:(k,v)=>storage.set(k,v),getItem:k=>storage.get(k)},history:{replaceState(_state,_title,url){urls.push(url);}},clearTimeout(){},setTimeout(){},document:{getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{classList:{contains(){return false;}}}}});
+ const storage=new Map(),urls=[];const ctx=vm.createContext({URL,Intl,Date,Set,location:{pathname:'/'},Image:class{},localStorage:{setItem:(k,v)=>storage.set(k,v),getItem:k=>storage.get(k)},history:{replaceState(_state,_title,url){urls.push(url);}},clearTimeout(){},setTimeout(){},document:{getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{classList:{contains(){return false;}}}}});
  vm.runInContext(script.slice(0,script.indexOf("$('choose').onclick=")),ctx);
  vm.runInContext("render=()=>{};tick=async()=>{};",ctx);
  const refresh=script.slice(script.indexOf('async function refresh()'),script.lastIndexOf('refresh();setInterval'));
@@ -53,4 +53,12 @@ test('reading older chat disables following until the viewport returns to the bo
  const{ctx,elements}=await setup();vm.runInContext("$('messages')",ctx);const box=elements.get('messages');
  Object.assign(box,{scrollHeight:2000,clientHeight:500,scrollTop:1000});vm.runInContext('updateAutoScroll()',ctx);assert.equal(vm.runInContext('auto',ctx),false);
  box.scrollTop=1500;vm.runInContext('updateAutoScroll()',ctx);assert.equal(vm.runInContext('auto',ctx),true);
+});
+
+test('initial HTML renders recent shared member status without waiting for external discovery and escapes embedded data',async()=>{
+ const row={handle:'ShirayukiHina_',status:'live',checkedAt:new Date().toISOString(),postUrl:'</script><script>alert(1)</script>',error:'internal details'};
+ const db={prepare(){return{bind(){return{async all(){return{results:[{payload:JSON.stringify(row)}]}}}}}}};
+ const page=await initialPage(db,'/ShirayukiHina_');assert(page.includes('class="status live" id="selectedStatus">방송 중</span>'));assert(!page.includes('internal details'));assert(!page.includes(row.postUrl));new vm.Script(page.match(/<script>([\s\S]*?)<\/script>/)[1]);
+ row.checkedAt=new Date(Date.now()-120000).toISOString();const stale=await initialPage(db,'/ShirayukiHina_');assert(stale.includes('class="status unknown" id="selectedStatus">확인 중</span>'));
+ row.status='offline';row.checkedAt=new Date().toISOString();assert((await initialPage(db,'/ShirayukiHina_')).includes('class="status offline" id="selectedStatus">오프라인</span>'));
 });
