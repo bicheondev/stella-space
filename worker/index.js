@@ -168,6 +168,7 @@ export async function sharedCollect(db,key,ttl,produce,options={}){
   }catch(e){
     const failures=(acquired.failure_count||0)+1;const backoff=/429/.test(e.message)?30000:options.failureBackoff?options.failureBackoff(failures):Math.max(typeof ttl==='function'?15000:ttl,3000);
     const failed=await db.prepare(`UPDATE collector_entries SET next_poll_at=?1,lease_until=0,lease_token='',last_error=?2,failure_count=failure_count+1 WHERE key=?3 AND lease_token=?4 RETURNING *`).bind(clock()+backoff,e.message,key,token).first();
+    if(failed)try{await db.prepare(`INSERT INTO collector_errors(at,key,error) VALUES(?1,?2,?3) RETURNING id`).bind(clock(),key,String(e.message).slice(0,1000)).first();await db.prepare(`DELETE FROM collector_errors WHERE id NOT IN (SELECT id FROM collector_errors ORDER BY id DESC LIMIT 500) RETURNING id`).bind().all();}catch{}
     if(failed?.payload)return output(failed);
     if(!failed){const current=await read();if(current?.payload)return output(current,current.lease_until>clock());}
     throw e;

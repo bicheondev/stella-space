@@ -10,10 +10,12 @@
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.10",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.10.2"
   }
 }
