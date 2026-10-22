@@ -164,3 +164,10 @@ test('CarryFeed 429 pauses the provider across members and normal deferrals neve
  assert.equal(a.prepare("SELECT COUNT(*) n FROM collector_errors WHERE key LIKE 'timeline:carry:%'").get().n,1);
  }finally{globalThis.fetch=original;a.close();b.close()}
 });
+
+test('HTTP 200 with a provider 429 code also opens the shared cooldown',async()=>{
+ const{a,b,dbA}=setup(),original=globalThis.fetch;
+ globalThis.fetch=async()=>Response.json({code:429},{headers:{'Retry-After':'120'}});
+ try{await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='budget:pause:fx'").get().next_poll_at>Date.now()+110000);assert(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='budget:pause:carry'").get().next_poll_at>Date.now()+290000);}
+ finally{globalThis.fetch=original;a.close();b.close()}
+});

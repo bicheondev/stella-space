@@ -51,6 +51,9 @@ test('dashboard renders real metric zeros, member state, job failures and safely
  assert(get('systemHealth').innerHTML.includes('1개 답글 조회 중'));
  vm.runInContext("data.sessions=[{handle:'HanayoHiyori',post_id:'123',state:'Ended',messages:0}];renderOverview();",ctx);
  assert(get('systemHealth').innerHTML.includes('방송 대기 중'));
+ vm.runInContext("data={now:Date.now(),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'offline',source:'carry',checkedAt:new Date().toISOString(),lease_until:0},{key:'timeline:fx:HanayoHiyori',last_started_at:Date.now()-1000,last_error:'외부 조회 오류 (404)',lease_until:0}],sessions:[],errors:[]};renderOverview();",ctx);
+ assert.equal(get('errorCount').textContent,0);assert(get('jobsTable').innerHTML.includes('대체 경로로 확인됨'));
+ vm.runInContext("data.collectors[0].warning='두 경로 모두 실패';renderOverview();",ctx);assert.equal(get('errorCount').textContent,1);
 });
 test('switching provider tabs never lets a late Vercel response overwrite the GA view',async()=>{
  const html=readFileSync(new URL('../server/operations.html',import.meta.url),'utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/renderAnalytics\(\);load\(\);loadAnalytics\(\);loadAnalytics\(analyticsProvider[\s\S]*$/,'');
