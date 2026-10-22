@@ -42,6 +42,22 @@ export function findSpacePost(posts,handle){
     return match?{post,space:match[1]}:null;
   }).find(Boolean)||null;
 }
+export async function rememberBroadcast(db,value,startedAt){
+ const postId=value.postUrl?.match(/\/status\/(\d{2,20})/)?.[1];
+ if(!postId||!value.space||!['Running','Ended'].includes(value.state))return await retainedBroadcast(db,value.handle)||value;
+ await db.prepare(`INSERT INTO broadcast_sessions (handle,post_id,space_id,started_at,payload) VALUES (?1,?2,?3,?4,?5)
+ ON CONFLICT(handle) DO UPDATE SET post_id=excluded.post_id,space_id=excluded.space_id,started_at=excluded.started_at,payload=excluded.payload
+ WHERE excluded.started_at>=broadcast_sessions.started_at`).bind(value.handle,postId,value.space,startedAt||0,JSON.stringify(value)).first();
+ return await retainedBroadcast(db,value.handle)||value;
+}
+async function retainedBroadcast(db,handle){const row=await db.prepare('SELECT payload FROM broadcast_sessions WHERE handle=?1').bind(handle).first();return row?JSON.parse(row.payload):null;}
+export async function archiveMessages(db,postId,messages){
+ for(let i=0;i<messages.length;i+=40){const part=messages.slice(i,i+40),args=[];const placeholders=part.map((m,j)=>{args.push(postId,m.id,JSON.stringify(m));return '('+[1,2,3].map(n=>'?'+(j*3+n)).join(',')+')';});if(part.length)await db.prepare('INSERT INTO broadcast_messages (post_id,id,payload) VALUES '+placeholders.join(',')+' ON CONFLICT(post_id,id) DO NOTHING').bind(...args).first();}
+}
+export async function broadcastHistory(db,postId,after=0){
+ const rows=await db.prepare('SELECT seq,payload FROM broadcast_messages WHERE post_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 501').bind(postId,after).all();
+ const page=rows.results.slice(0,500);return{messages:page.map(row=>JSON.parse(row.payload)),historyCursor:page.at(-1)?.seq||after,hasMore:rows.results.length>500};
+}
 async function profile(handle,db){
   const member=members.flatMap(g=>g[2]).find(m=>m[1].toLowerCase()===handle.toLowerCase());
   if(!member)throw Error('등록되지 않은 멤버입니다.');handle=member[1];
@@ -51,9 +67,9 @@ async function profile(handle,db){
     const own=d.results.find(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase());
     const avatar=own?.author?.avatar_url;
     const found=findSpacePost(d.results,handle);
-    if(!found)return{handle,avatar,status:'offline',reason:'최근 게시물 5개에 Space 공유 글이 없어 오프라인으로 표시합니다.'};
+    if(!found){const prior=await retainedBroadcast(db,handle);return{...prior,handle,avatar,status:'offline',state:prior?'Ended':undefined};}
     let m;try{m=await spaceMetadata(found.space,db);}catch{}
-    return{handle,avatar,status:m?.state==='Running'?'live':m?.state==='Ended'?'offline':'unknown',state:m?.state||'Unknown',currentParticipants:m?.currentParticipants??null,space:found.space,title:m?.title||member[0]+'의 스페이스',postUrl:'https://x.com/'+handle+'/status/'+found.post.id};
+    return rememberBroadcast(db,{handle,avatar,status:m?.state==='Running'?'live':m?.state==='Ended'?'offline':'unknown',state:m?.state||'Unknown',currentParticipants:m?.currentParticipants??null,space:found.space,title:m?.title||member[0]+'의 스페이스',postUrl:'https://x.com/'+handle+'/status/'+found.post.id},Number(found.post.created_timestamp)*1000);
   });
   return{handle,status:'unknown',...value};
 }
@@ -68,6 +84,7 @@ async function resolve(input,db){
   if(!tweetId&&!/^[A-Za-z0-9]{8,30}$/.test(id||''))throw Error('Space 또는 Space 공유 게시물 URL을 입력해 주세요.');
   return sharedCollect(db,'resolve:'+(tweetId?'post:'+tweetId:'space:'+id),15000,async()=>{
     let tweet;
+    if(tweetId){const saved=await db.prepare('SELECT payload FROM broadcast_sessions WHERE post_id=?1').bind(tweetId).first();if(saved){const session=JSON.parse(saved.payload);let m;try{m=await spaceMetadata(session.space,db);}catch{}return{id:session.space,tweet:tweetId,handle:session.handle,title:session.title,avatar:session.avatar,state:m?.state||session.state,currentParticipants:m?.currentParticipants??null};}}
     if(tweetId){
       tweet=await json('https://cdn.syndication.twimg.com/tweet-result?id='+tweetId+'&lang=ko&token=0');
       const link=tweet.entities?.urls?.find(x=>/\/i\/spaces\//.test(x.expanded_url));
@@ -128,18 +145,23 @@ export function parseFxReplies(data,rootId){
   }
   return{messages:[...byId.values()].sort((a,b)=>a.time-b.time),total:data.status?.replies??null,cursor:data.cursor?.bottom||null,limited:true,source:'fxtwitter'};
 }
-async function replies(id,db,knownSpaceId=null){
+async function seedBroadcastHistory(db,id){
+ const exists=await db.prepare('SELECT seq FROM broadcast_messages WHERE post_id=?1 LIMIT 1').bind(id).first();
+ if(!exists){const prior=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('replies:fxtwitter:'+id).first();if(prior?.payload)await archiveMessages(db,id,JSON.parse(prior.payload).messages||[]);}
+}
+async function replies(id,db,knownSpaceId=null,after=0){
   if(!/^\d{2,20}$/.test(id))throw Error('공유 게시물 ID를 입력해 주세요.');
+  await seedBroadcastHistory(db,id);
   const resolved=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('resolve:post:'+id).first();
   const spaceId=knownSpaceId||(resolved?.payload?JSON.parse(resolved.payload).id:null);
   const space=spaceId?await spaceMetadata(spaceId,db):null;
   if(space?.state==='Ended'){
     const cached=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('replies:fxtwitter:'+id).first();
-    return {...(cached?.payload?JSON.parse(cached.payload):{messages:[],source:'fxtwitter',limited:true}),shared:true,collecting:false,stopped:true,pollIntervalMs:null};
+    const prior=cached?.payload?JSON.parse(cached.payload):{messages:[],source:'fxtwitter',limited:true};return {...prior,...await broadcastHistory(db,id,after),shared:true,collecting:false,stopped:true,pollIntervalMs:null};
   }
   const schedule=await replySchedule(db,id);
-  const result=await sharedCollect(db,'replies:fxtwitter:'+id,schedule.pollIntervalMs,async()=>parseFxReplies(await fxJson(db,'https://api.fxtwitter.com/2/conversation/'+id+'?ranking_mode=recency'),id),{mergeMessages:true,startCadence:true});
-  return {...result,...schedule};
+  const result=await sharedCollect(db,'replies:fxtwitter:'+id,schedule.pollIntervalMs,async()=>{const result=parseFxReplies(await fxJson(db,'https://api.fxtwitter.com/2/conversation/'+id+'?ranking_mode=recency'),id);await archiveMessages(db,id,result.messages);return result;},{mergeMessages:true,startCadence:true});
+  return {...result,...schedule,...await broadcastHistory(db,id,after)};
 }
 export async function collectLiveRooms(db){
   const rows=await db.prepare(`SELECT payload FROM collector_entries WHERE key LIKE 'member:v2:%' AND payload IS NOT NULL AND last_error IS NULL AND last_started_at>=?1 AND json_extract(payload,'$.status')='live'`).bind(Date.now()-30000).all();
@@ -159,7 +181,7 @@ export default{async fetch(request,env={},ctx){
     if(u.pathname==='/api/members')d=await Promise.all(members.flatMap(g=>g[2]).map(async m=>{try{return await profile(m[1],env.DB);}catch(e){return{handle:m[1],status:'unknown',error:e.message};}}));
     else if(u.pathname==='/api/collect-live')d=await collectLiveRooms(env.DB);
     else if(u.pathname==='/api/member')d=await profile(u.searchParams.get('handle')||'',env.DB);
-    else if(u.pathname==='/api/replies')d=await replies(u.searchParams.get('id')||'',env.DB);
+    else if(u.pathname==='/api/replies')d=await replies(u.searchParams.get('id')||'',env.DB,null,Math.max(0,Number(u.searchParams.get('after'))||0));
     else if(u.pathname==='/api/resolve')d=await resolve(u.searchParams.get('url')||'',env.DB);
     else return new Response('Not found',{status:404});
     return Response.json(d,{headers:{'Cache-Control':'no-store'}});
@@ -184,7 +206,7 @@ const memberFromPath=${memberFromPath.toString()};
 const firstLiveMember=${firstLiveMember.toString()};
 const avatars={"GANGZIIII":"https://pbs.twimg.com/profile_images/2079577190120017921/5IQ_nY3z_200x200.jpg","ShizukiToa_":"https://pbs.twimg.com/profile_images/2109194861454991360/gmbvYD-8_normal.jpg","AyatsunoYuni": "https://pbs.twimg.com/profile_images/2106898417473765378/EWJt3rQG_normal.jpg", "SakihaneHuya": "https://pbs.twimg.com/profile_images/2112914105988534273/12E-Bd8C_normal.jpg", "NenekoMashiro": "https://pbs.twimg.com/profile_images/2093138069209919488/M_Ckz81n_normal.jpg", "ArahashiTabi": "https://pbs.twimg.com/profile_images/2109951512793550848/9gKe9qj0_normal.jpg", "ShirayukiHina_": "https://pbs.twimg.com/profile_images/2096096251553198081/V2oCybbe_normal.jpg", "AkaneLize": "https://pbs.twimg.com/profile_images/2094140237320740864/Kyx-TSwi_normal.jpg", "AokumoRin": "https://pbs.twimg.com/profile_images/2112495217878466560/JxqyWCpf_normal.jpg", "TenkoShibuki": "https://pbs.twimg.com/profile_images/2110747276453003264/2gSgV1C9_normal.jpg", "HanakoNana_": "https://pbs.twimg.com/profile_images/2012139881682886656/MYD8iYpq_normal.jpg", "YuzuhaRiko": "https://pbs.twimg.com/profile_images/2081257497386696704/Onv3oD96_normal.jpg", "CoganeRang": "https://pbs.twimg.com/profile_images/2109194867054456832/NCvLV-QW_normal.jpg", "HanayoHiyori": "https://pbs.twimg.com/profile_images/2109194867427700736/7FOyJX35_normal.jpg", "TokinoMery": "https://pbs.twimg.com/profile_images/2111785505700630528/zG8ipTSf_normal.jpg"};
 const fontSizes=[14,16,18];let fontIndex=0;
-const $=id=>document.getElementById(id);let selected='GANGZIIII',statuses=Object.fromEntries(Object.entries(avatars).map(([handle,avatar])=>[handle,{avatar,status:'unknown'}])),room=null,cursor='',generation=0,seen=new Set(),auto=true,poll=null,nextPollMs=500,connecting=false,rootPending=false;
+const $=id=>document.getElementById(id);let selected='GANGZIIII',statuses=Object.fromEntries(Object.entries(avatars).map(([handle,avatar])=>[handle,{avatar,status:'unknown'}])),room=null,cursor=0,generation=0,seen=new Set(),auto=true,poll=null,nextPollMs=500,connecting=false,rootPending=false;
 // Source: https://abs.twimg.com/x-web/x-web/assets/icon-spaces-fill-dkNkOItq.js
 const spacesIcon='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M22.4 14.26a10.75 10.75 0 0 1-20.8 0l1.94-.52a8.75 8.75 0 0 0 16.92 0z"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.75a7 7 0 0 1 7 7v2.75a7 7 0 0 1-13.99.36V8.75a7 7 0 0 1 7-7M11.1 13h1.8V7h-1.8zm-3-1h1.8V8H8.1zm6 0h1.8V8h-1.8z"/></svg>';
 function avatar(el,name,url,live=false){
@@ -209,29 +231,30 @@ async function select(name,handle,i){
 }
 function notice(text,error=false){const n=document.createElement('div');n.className='notice'+(error?' error':'');n.textContent=text;$('messages').append(n);}
 async function api(path){const r=await fetch(path,{cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'연결 실패');return d;}
-async function connect(input){const g=++generation;clearTimeout(poll);room=null;connecting=true;$('connection').textContent='◌ Space 확인 중';$('title').textContent='스페이스를 확인하고 있어요';$('messages').replaceChildren();seen=new Set();auto=true;cursor='';try{const r=await api('/api/resolve?url='+encodeURIComponent(input));if(g!==generation)return;if(r.collecting&&!r.id){$('connection').textContent='◌ 공유 게시물 확인 중';poll=setTimeout(()=>{if(g===generation)connect(input);},1000);return;}room=r;connecting=false;const groupIndex=groups.findIndex(group=>group[2].some(m=>m[1].toLowerCase()===r.handle?.toLowerCase()));if(groupIndex>=0){const member=groups[groupIndex][2].find(m=>m[1].toLowerCase()===r.handle.toLowerCase());selected=member[1];localStorage.setItem('member',selected);$('selectedName').textContent=member[0];$('selectedHandle').textContent='@'+selected+(groups[groupIndex][1]?' · '+groups[groupIndex][1]:'');}$('title').textContent=r.title;$('state').textContent=r.state==='Running'?'LIVE':r.state==='Ended'?'종료됨':r.state==='Unknown'?'상태 미확인':'예정';$('streamInfo').textContent=r.state==='Ended'?'종료된 Space · 공개 메시지 기록':'공개 Space · 읽기 전용';$('streamHandle').textContent='@'+r.handle;updateAudience(r);$('external').href=r.tweet?'https://x.com/'+r.handle+'/status/'+r.tweet:'https://x.com/i/spaces/'+r.id;statuses[r.handle]={...statuses[r.handle],status:r.state==='Running'?'live':r.state==='Ended'?'offline':'unknown',avatar:r.avatar,space:r.state==='Running'?r.id:undefined};render();history.replaceState(null,'',groupIndex>=0?'/'+selected+(document.body.classList.contains('popup')?'?popup=1':''):'/?space='+r.id+(r.tweet?'&post='+r.tweet:'')+(document.body.classList.contains('popup')?'&popup=1':''));$('streamInfo').textContent='공유 게시물 답글 · 자동 주기로 확인';if(!r.tweet){notice('Space 공유 게시물을 찾지 못했습니다.');$('connection').textContent='○ 공유 게시물 확인 중';return;}notice('채팅방에 오신 것을 환영합니다!');await tick(g);}catch(e){if(g!==generation)return;connecting=false;$('title').textContent='스페이스에 연결하지 못했습니다';$('connection').textContent='○ 연결 제한';notice(e.message,true);}}
+async function connect(input){const g=++generation;clearTimeout(poll);room=null;connecting=true;$('connection').textContent='◌ Space 확인 중';$('title').textContent='스페이스를 확인하고 있어요';$('messages').replaceChildren();seen=new Set();auto=true;cursor=0;try{const r=await api('/api/resolve?url='+encodeURIComponent(input));if(g!==generation)return;if(r.collecting&&!r.id){$('connection').textContent='◌ 공유 게시물 확인 중';poll=setTimeout(()=>{if(g===generation)connect(input);},1000);return;}room=r;connecting=false;const groupIndex=groups.findIndex(group=>group[2].some(m=>m[1].toLowerCase()===r.handle?.toLowerCase()));if(groupIndex>=0){const member=groups[groupIndex][2].find(m=>m[1].toLowerCase()===r.handle.toLowerCase());selected=member[1];localStorage.setItem('member',selected);$('selectedName').textContent=member[0];$('selectedHandle').textContent='@'+selected+(groups[groupIndex][1]?' · '+groups[groupIndex][1]:'');}$('title').textContent=r.title;$('state').textContent=r.state==='Running'?'LIVE':r.state==='Ended'?'종료됨':r.state==='Unknown'?'상태 미확인':'예정';$('streamInfo').textContent=r.state==='Ended'?'종료된 Space · 공개 메시지 기록':'공개 Space · 읽기 전용';$('streamHandle').textContent='@'+r.handle;updateAudience(r);$('external').href=r.tweet?'https://x.com/'+r.handle+'/status/'+r.tweet:'https://x.com/i/spaces/'+r.id;statuses[r.handle]={...statuses[r.handle],status:r.state==='Running'?'live':r.state==='Ended'?'offline':'unknown',avatar:r.avatar,space:r.state==='Running'?r.id:undefined};render();history.replaceState(null,'',groupIndex>=0?'/'+selected+(document.body.classList.contains('popup')?'?popup=1':''):'/?space='+r.id+(r.tweet?'&post='+r.tweet:'')+(document.body.classList.contains('popup')?'&popup=1':''));$('streamInfo').textContent='공유 게시물 답글 · 자동 주기로 확인';if(!r.tweet){notice('Space 공유 게시물을 찾지 못했습니다.');$('connection').textContent='○ 공유 게시물 확인 중';return;}notice('채팅방에 오신 것을 환영합니다!');await tick(g);}catch(e){if(g!==generation)return;connecting=false;$('title').textContent='스페이스에 연결하지 못했습니다';$('connection').textContent='○ 연결 제한';notice(e.message,true);}}
 async function tick(g){
  if(g!==generation||!room?.tweet)return;
- const startedAt=Date.now();
+ const startedAt=Date.now();let dHasMore=false;
  try{
-  const d=await api('/api/replies?id='+room.tweet);
+  const d=await api('/api/replies?id='+room.tweet+'&after='+cursor);
   if(g!==generation)return;
   if(d.stopped){room.state='Ended';updateAudience(room);}
   nextPollMs=Number.isFinite(d.pollIntervalMs)?Math.max(50,d.pollIntervalMs):500;
+  dHasMore=!!d.hasMore;cursor=d.historyCursor??cursor;
   for(const m of d.messages){if(seen.has(m.id))continue;seen.add(m.id);
    const n=document.createElement('div');n.className='message';n.style.fontSize=fontSizes[fontIndex]+'px';
    const t=document.createElement('time');t.textContent=m.time?new Date(m.time).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false}):'';t.hidden=!$('timestamps').checked;
    const b=document.createElement('b');b.textContent=m.name;b.title='@'+m.handle;const palette=['#ad8abf','#d58cb2','#9bb8d8','#9cc99d','#cfb088','#a7a1d0','#b9c77c','#82bfb7'];let hash=0;for(const ch of m.handle||m.name)hash=(hash*31+ch.charCodeAt(0))>>>0;b.style.setProperty('--nick-color',palette[hash%palette.length]);
    const body=document.createElement('span');body.textContent=stripLeadingMentions(m.text);n.append(t,b,body);if(m.photos?.length){const media=document.createElement('div');media.className='message-media';for(const photo of m.photos){const link=document.createElement('a');link.href=photo.url;link.target='_blank';link.rel='noopener noreferrer';const img=document.createElement('img');const thumb=new URL(photo.url);thumb.searchParams.set('name','small');img.src=thumb.href;img.alt='첨부 이미지';img.loading='lazy';img.referrerPolicy='no-referrer';img.onload=()=>{if(auto&&g===generation)$('messages').scrollTop=$('messages').scrollHeight;};img.onerror=()=>link.remove();link.append(img);media.append(link);}n.append(media);}$('messages').append(n);
   }
-  while($('messages').children.length>500)$('messages').firstChild.remove();
+
   if(auto)$('messages').scrollTop=$('messages').scrollHeight;
   $('connection').textContent=(d.stale?'○ 갱신 지연 · ':d.collecting?'◌ 수집 중 · ':'● ')+'답글 '+seen.size+'개 · 일부 답글';
   if(room.state==='Ended')$('connection').textContent='○ 종료됨 · 답글 조회 중지 · '+seen.size+'개';
   $('connection').title=(d.checkedAt?'마지막 성공 조회: '+new Date(d.checkedAt).toLocaleTimeString('ko-KR'):'공유 수집기에서 첫 응답을 기다리고 있습니다.')+(d.warning?' · '+d.warning:'');
   if(d.total!=null)$('streamInfo').textContent='공유 게시물 답글 '+Intl.NumberFormat('ko').format(d.total)+'개 · '+(nextPollMs/1000).toFixed(2)+'초마다 확인';
  }catch(e){if(g!==generation)return;$('connection').textContent='○ 갱신 실패 · 재시도 중';$('connection').title=e.message;if(!seen.size&&!$('messages').querySelector('.error'))notice(e.message,true);}
- if(g===generation&&room?.state!=='Ended')poll=setTimeout(()=>tick(g),Math.max(0,nextPollMs-(Date.now()-startedAt)));
+ if(g===generation&&(room?.state!=='Ended'||dHasMore))poll=setTimeout(()=>tick(g),dHasMore?0:Math.max(0,nextPollMs-(Date.now()-startedAt)));
 }
 function updateAutoScroll(){const box=$('messages');auto=box.scrollHeight-box.clientHeight-box.scrollTop<=4;}
 async function collectAllLive(){

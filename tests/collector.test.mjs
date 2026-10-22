@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot,collectLiveRooms} from '../worker/index.js';
+import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot,collectLiveRooms,rememberBroadcast,archiveMessages,broadcastHistory} from '../worker/index.js';
 const migration=readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8');
 function binding(sqlite){
  return {
@@ -17,7 +17,7 @@ function binding(sqlite){
   }
  };
 }
-function setup(){const file=join(mkdtempSync(join(tmpdir(),'stella-collector-')),'db.sqlite');const a=new DatabaseSync(file);a.exec(migration);const b=new DatabaseSync(file);return{a,b,dbA:binding(a),dbB:binding(b)};}
+function setup(){const file=join(mkdtempSync(join(tmpdir(),'stella-collector-')),'db.sqlite');const a=new DatabaseSync(file);a.exec(migration);a.exec(readFileSync(new URL('../server/session-schema.sql',import.meta.url),'utf8'));const b=new DatabaseSync(file);return{a,b,dbA:binding(a),dbB:binding(b)};}
 test('different workers contend for one database lease and issue only one external fetch',async()=>{
  const{a,b,dbA,dbB}=setup();let calls=0,release;const gate=new Promise(r=>release=r);const produce=async()=>{calls++;await gate;return{messages:[{id:'1',time:1}],source:'fxtwitter'};};
  const winner=sharedCollect(dbA,'replies:fxtwitter:1',1000,produce);await new Promise(r=>setImmediate(r));
@@ -105,4 +105,19 @@ test('one visitor collects every live room once across workers and isolates fail
   assert.equal(calls.length,2);assert.ok(calls.every(url=>!url.includes('333')&&!url.includes('444')));
   const stored=JSON.parse(a.prepare("SELECT payload FROM collector_entries WHERE key='replies:fxtwitter:111'").get().payload);assert.equal(stored.messages[0].id,'reply');
  }finally{release();globalThis.fetch=original;a.close();b.close();}
+});
+
+test('broadcast history keeps more than 500 replies, survives ending, and separates the next broadcast',async()=>{
+ const{a,b,dbA}=setup();
+ const old={handle:'member',space:'room-one',postUrl:'https://x.com/member/status/111',state:'Running',status:'live'};
+ await rememberBroadcast(dbA,old,1000);
+ const messages=Array.from({length:625},(_,i)=>({id:String(i),text:'message '+i,time:i}));await archiveMessages(dbA,'111',messages);await archiveMessages(dbA,'111',messages);
+ const first=await broadcastHistory(dbA,'111');assert.equal(first.messages.length,500);assert.equal(first.hasMore,true);
+ const rest=await broadcastHistory(dbA,'111',first.historyCursor);assert.equal(rest.messages.length,125);assert.equal(rest.hasMore,false);
+ await rememberBroadcast(dbA,{...old,state:'Ended',status:'offline'},1000);
+ assert.equal(JSON.parse(a.prepare("SELECT payload FROM broadcast_sessions WHERE handle='member'").get().payload).state,'Ended');
+ const next={...old,space:'room-two',postUrl:'https://x.com/member/status/222'};await rememberBroadcast(dbA,next,2000);
+ assert.deepEqual((await broadcastHistory(dbA,'222')).messages,[]);
+ assert.equal((await rememberBroadcast(dbA,{...old,state:'Ended'},1000)).space,'room-two');
+ assert.equal((await broadcastHistory(dbA,'111')).messages.length,500);a.close();b.close();
 });
