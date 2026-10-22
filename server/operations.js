@@ -1,4 +1,4 @@
-import {saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
+import {webPushControl,saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
 import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
@@ -17,8 +17,9 @@ export async function operations(req,url,db){
   if(req.method==='POST'){if(req.headers.origin!==url.origin)return json({},403);try{return json(await saveXSession(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch(e){return json({error:e.message},400)}}
   if(req.method!=='GET')return json({},405);return json(await notificationStatus(db));
  }
- if(url.pathname==='/api/notification-config'||url.pathname==='/api/notification-event'){
+ if(url.pathname==='/api/notification-push'||url.pathname==='/api/notification-config'||url.pathname==='/api/notification-event'){
   if(!collectorAuthorized(req.headers.authorization))return json({error:'Not found'},404);
+  if(url.pathname==='/api/notification-push'){if(req.method!=='POST')return json({},405);try{return json(await webPushControl(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch{return json({error:'Push state update failed'},400)}}
   if(url.pathname==='/api/notification-config'){if(req.method!=='GET')return json({},405);return json({config:await notificationConfig(db)});}
   if(req.method!=='POST')return json({},405);
   try{return json(await receiveNotificationEvent(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch{return json({error:'알림 처리 실패'},400)}

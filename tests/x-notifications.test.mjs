@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
-import {saveXSession,notificationConfig,notificationStatus,receiveNotificationEvent,validateXSession,collectorAuthorized} from '../server/x-notifications.js';
+import {webPushControl,saveXSession,notificationConfig,notificationStatus,receiveNotificationEvent,validateXSession,collectorAuthorized} from '../server/x-notifications.js';
 import {notificationPosts,notificationFrame,syncFollowNotifications} from '../scripts/x-notifications.mjs';
 import {ingestNotificationPosts} from '../worker/index.js';
 import {operations} from '../server/operations.js';
@@ -21,7 +21,7 @@ test('bot sessions verify the intended account and are encrypted, never returned
 test('notification credentials and ingestion require the background collector secret',async()=>{
  process.env.OPERATIONS_SECRET='test-ops-secret';process.env.COLLECTOR_SECRET='test-background-secret';const{sqlite,db}=fixture();try{
  assert(!collectorAuthorized('Bearer wrong'));assert(collectorAuthorized('Bearer test-background-secret'));
- for(const path of ['/api/notification-config','/api/notification-event','/api/admin/x-notifications'])assert.equal((await operations({method:'GET',headers:{}},new URL(path,'https://stellive-space.vercel.app'),db)).status,404);
+ for(const path of ['/api/notification-config','/api/notification-event','/api/notification-push','/api/admin/x-notifications'])assert.equal((await operations({method:'GET',headers:{}},new URL(path,'https://stellive-space.vercel.app'),db)).status,404);
  }finally{sqlite.close()}
 });
 test('only registered authors and original posts leave the notification inbox',()=>{
@@ -44,4 +44,24 @@ test('follow setup preserves existing settings and respects retry-after without 
  const result=await syncFollowNotifications({}, {targets:['GANGZIIII','HanayoHiyori','TokinoMary'],now:1000,headersFor:async()=>({}),fetcher:async(url,options)=>{calls.push({url,method:options.method});if(url.includes('target_screen_name=GANGZIIII'))return Response.json(state);if(url.includes('friendships/show'))return Response.json({relationship:{source:{following:false,notifications_enabled:false}}});return Response.json({errors:[{code:161}]},{status:429,headers:{'retry-after':'3600'}});}});
  assert.deepEqual(result.enabled,['GANGZIIII']);assert.deepEqual(result.pending,['HanayoHiyori','TokinoMary']);assert.equal(result.retryAt,3601000);assert.equal(calls.filter(c=>c.method==='POST').length,1);
  const skipped=await syncFollowNotifications({followSetup:result},{targets:['GANGZIIII','HanayoHiyori','TokinoMary'],now:2000,fetcher:async()=>{throw Error('must not retry before reset')}});assert.deepEqual(skipped,result);
+});
+
+test('push subscription has one owner, encrypted keys and safe handoff after release or expiry',async()=>{
+ process.env.OPERATIONS_SECRET='test-ops-secret';const{sqlite,db}=fixture();
+ const a='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+ const state={endpoint:'https://updates.push.services.mozilla.com/wpush/v2/test',decryptor:{jwk:{d:'private-key'},auth:'private-auth'}};
+ try{
+ assert.equal((await webPushControl(db,{owner:a})).owned,true);
+ assert.equal((await webPushControl(db,{owner:b,state})).owned,false);
+ assert.equal((await webPushControl(db,{owner:a,state})).state.decryptor.auth,'private-auth');
+ const stored=sqlite.prepare("SELECT value FROM operations_settings WHERE key='x_push_state'").get().value;
+ assert(!stored.includes('private-key'));assert(!stored.includes('private-auth'));
+ assert(!JSON.stringify(await notificationStatus(db)).includes('private-auth'));
+ await webPushControl(db,{owner:a,action:'release'});
+ assert.deepEqual((await webPushControl(db,{owner:b})).state,state);
+ assert.equal((await webPushControl(db,{owner:a,state})).owned,false);
+ sqlite.prepare("UPDATE operations_settings SET value=json_set(value,'$.until',0) WHERE key='x_push_owner'").run();
+ assert.equal((await webPushControl(db,{owner:a})).owned,true);
+ assert.equal((await webPushControl(db,{owner:b,action:'release'})).owned,false);
+ }finally{sqlite.close()}
 });

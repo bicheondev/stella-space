@@ -27,9 +27,21 @@ export function collectorAuthorized(header=''){const secret=process.env.COLLECTO
 export async function receiveNotificationEvent(db,body){
  const mode=['push','polling','connecting','error','stopped'].includes(body?.mode)?body.mode:'error';
  const count=await ingestNotificationPosts(db,Array.isArray(body?.posts)?body.posts.slice(0,100):[]);
- const value={mode,checkedAtMs:Date.now(),checkedAt:new Date().toISOString(),lastPushAt:typeof body.lastPushAt==='number'?body.lastPushAt:null,lastScanAt:typeof body.lastScanAt==='number'?body.lastScanAt:null,postsReceived:count,error:typeof body.error==='string'?body.error.slice(0,120):null,source:'x-notifications'};
+ const value={mode,checkedAtMs:Date.now(),checkedAt:new Date().toISOString(),pushConnected:body.pushConnected===true,lastPushAt:typeof body.lastPushAt==='number'?body.lastPushAt:null,lastScanAt:typeof body.lastScanAt==='number'?body.lastScanAt:null,postsReceived:count,error:typeof body.error==='string'?body.error.slice(0,120):null,source:'x-notifications'};
  if(body?.followSetup){const f=body.followSetup;value.followSetup={enabled:memberHandles.filter(h=>f.enabled?.includes(h)),pending:memberHandles.filter(h=>!f.enabled?.includes(h)),retryAt:Number.isFinite(f.retryAt)?f.retryAt:0,checkedAt:Number.isFinite(f.checkedAt)?Math.min(f.checkedAt,Date.now()):Date.now()};await db.prepare("INSERT INTO operations_settings(key,value) VALUES('x_follow_setup',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE json_extract(excluded.value,'$.checkedAt')>=json_extract(operations_settings.value,'$.checkedAt') RETURNING key").bind(JSON.stringify(value.followSetup)).first();}
  const key=/^[a-f0-9-]{36}$/.test(body?.runId||'')?'x-notifications:'+body.runId:'x-notifications';
  await db.prepare(`INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?1,?2,0) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,last_error=excluded.last_error RETURNING key`).bind(key,JSON.stringify(value)).first();
  await db.prepare(`DELETE FROM collector_entries WHERE key LIKE 'x-notifications:%' AND json_extract(payload,'$.checkedAtMs')<?1 RETURNING key`).bind(Date.now()-86400000).all();return{ok:true,accepted:count};
+}
+
+// One receiver owns the saved Mozilla subscription; never expose its keys in status.
+export async function webPushControl(db,body){
+ if(!/^[a-f0-9-]{36}$/.test(body?.owner||''))throw Error('Invalid receiver');
+ const now=Date.now();
+ const row=await db.prepare(`INSERT INTO operations_settings(key,value) VALUES('x_push_owner',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE json_extract(operations_settings.value,'$.until')<?2 OR json_extract(operations_settings.value,'$.owner')=?3 RETURNING value`).bind(JSON.stringify({owner:body.owner,until:now+60000}),now,body.owner).first();
+ if(!row)return{owned:false};
+ if(body.action==='release'){await db.prepare("DELETE FROM operations_settings WHERE key='x_push_owner' AND json_extract(value,'$.owner')=?1 RETURNING key").bind(body.owner).first();return{owned:false};}
+ if(body.state){if(JSON.stringify(body.state).length>16000||!body.state.decryptor?.jwk||!body.state.endpoint?.startsWith('https://updates.push.services.mozilla.com/'))throw Error('Invalid push state');await db.prepare("INSERT INTO operations_settings(key,value) VALUES('x_push_state',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key").bind(encryptToken(JSON.stringify(body.state))).first();}
+ const state=await db.prepare("SELECT value FROM operations_settings WHERE key='x_push_state'").bind().first();
+ return{owned:true,state:state?JSON.parse(decryptToken(state.value)):null};
 }

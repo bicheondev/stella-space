@@ -17,6 +17,7 @@
     "@libsql/client": "^0.18.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.10.2",
-    "x-client-transaction-id": "^0.3.2"
+    "x-client-transaction-id": "^0.3.2",
+    "xnotif": "^0.2.1"
   }
 }
