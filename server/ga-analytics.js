@@ -21,9 +21,9 @@ async function report(config,token,dimension,startDate,fetcher){
 }
 const metrics=r=>({visitors:Number(r.metricValues?.[0]?.value||0),pageviews:Number(r.metricValues?.[1]?.value||0)});
 export async function gaReports(config,{now=Date.now(),fetcher=fetch}={}){
- const token=await accessToken(config,fetcher,now);const [today,daily,countries,referrers,pages]=await Promise.all([report(config,token,null,'today',fetcher),...['date','country','sessionSourceMedium','pagePath'].map(d=>report(config,token,d,'6daysAgo',fetcher))]);
+ const token=await accessToken(config,fetcher,now);const [today,daily,countries,referrers,pages,weekly,monthly]=await Promise.all([report(config,token,null,'today',fetcher),...['date','country','sessionSourceMedium','pagePath'].map(d=>report(config,token,d,'6daysAgo',fetcher)),report(config,token,null,'6daysAgo',fetcher),report(config,token,null,'29daysAgo',fetcher)]);
  const map=(r,key)=>(r.rows||[]).map(row=>({[key]:row.dimensionValues?.[0]?.value||'',...metrics(row)}));
- return {source:'Google Analytics 4',status:'connected',checkedAt:now,timezone:today.metadata?.timeZone||daily.metadata?.timeZone||'GA 속성 시간대',propertyId:config.propertyId,totals:today.rows?.[0]?metrics(today.rows[0]):{visitors:0,pageviews:0},daily:map(daily,'timestamp').map(r=>({...r,timestamp:r.timestamp.replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3T00:00:00')})),countries:map(countries,'country'),referrers:map(referrers,'referrerHostname'),pages:map(pages,'requestPath')};
+ return {source:'Google Analytics 4',status:'connected',checkedAt:now,timezone:today.metadata?.timeZone||daily.metadata?.timeZone||'GA 속성 시간대',propertyId:config.propertyId,activeUsers:{dau:Number(today.rows?.[0]?.metricValues?.[0]?.value||0),wau:Number(weekly.rows?.[0]?.metricValues?.[0]?.value||0),mau:Number(monthly.rows?.[0]?.metricValues?.[0]?.value||0)},totals:today.rows?.[0]?metrics(today.rows[0]):{visitors:0,pageviews:0},daily:map(daily,'timestamp').map(r=>({...r,timestamp:r.timestamp.replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3T00:00:00')})),countries:map(countries,'country'),referrers:map(referrers,'referrerHostname'),pages:map(pages,'requestPath')};
 }
 export async function saveGaConfig(db,propertyId,credentials){
  const config=validateGaConfig(propertyId,credentials);const data=await gaReports(config);
@@ -34,6 +34,6 @@ export async function gaAnalytics(db,options={}){
  const config=row?JSON.parse(decryptToken(row.value)):process.env.GA_PROPERTY_ID&&process.env.GA_SERVICE_ACCOUNT_JSON?validateGaConfig(process.env.GA_PROPERTY_ID,process.env.GA_SERVICE_ACCOUNT_JSON):null;
  if(!config)return{source:'Google Analytics 4',status:'disconnected',message:'GA 태그는 설치되어 있습니다. 통계를 표시하려면 속성 ID와 뷰어 권한이 있는 서비스 계정 키를 연결해 주세요.'};
  let previous;try{const cache=await db.prepare(`SELECT value FROM operations_settings WHERE key='ga_cache'`).bind().first();previous=cache?JSON.parse(cache.value):null}catch{}
- const now=options.now??Date.now();if(previous&&now-previous.checkedAt<120000)return previous;
+ const now=options.now??Date.now();if(previous?.activeUsers&&now-previous.checkedAt<120000)return previous;
  try{const data=await gaReports(config,options);await db.prepare(`INSERT INTO operations_settings(key,value) VALUES('ga_cache',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key`).bind(JSON.stringify(data)).first();return data}catch(e){return{...(previous||{}),source:'Google Analytics 4',status:previous?'stale':'error',message:e.message}}
 }
