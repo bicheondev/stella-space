@@ -2,24 +2,23 @@
 export const debugChatScript=String.raw`
 const debugSend=value=>parent.postMessage({type:'space-debug',...value},location.origin);
 const debugOriginalApi=api;
-let debugLastTotal=null,debugPendingCount=null;
+let debugHistoryReady=false;
 api=async function(path){
- const requestId=crypto.randomUUID();debugSend({event:'request',path,requestId,at:Date.now()});
+ const requestId=crypto.randomUUID(),requestStart=performance.now(),requestGeneration=generation;debugSend({event:'request',path,requestId,at:Date.now()});
  try{const result=await debugOriginalApi(path);debugSend({event:'response',path,requestId,at:Date.now(),result});
- if(path.startsWith('/api/resolve')){debugLastTotal=null;debugPendingCount=null;debugSend({event:'latency-reset'});}
- if(path.startsWith('/api/replies')&&Number.isFinite(result.total)){
-  const now=performance.now(),before=seen.size,g=generation,post=room?.tweet;
-  if(debugPendingCount&&now-debugPendingCount.at>60000){debugPendingCount=null;debugSend({event:'latency-status',status:'60초 내 대응 채팅이 없어 측정에서 제외했어요.'});}
-  if(before>0&&!result.hasMore&&debugLastTotal!==null&&result.total>debugLastTotal&&!debugPendingCount)debugPendingCount={at:now};
-  debugLastTotal=result.total;
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-   if(g!==generation||room?.tweet!==post)return;
-   if(debugPendingCount&&seen.size>before){
-    if(auto&&!document.hidden)debugSend({event:'latency-sample',ms:performance.now()-debugPendingCount.at,at:Date.now()});
-    else debugSend({event:'latency-status',status:'자동 스크롤 해제 또는 백그라운드 상태라 이번 표본은 제외했어요.'});
-    debugPendingCount=null;
-   }else if(debugPendingCount)debugSend({event:'latency-status',status:'답글 수 증가 확인 · 새 채팅 표시 대기 중'});
+ if(path.startsWith('/api/resolve')&&requestGeneration===generation){debugHistoryReady=false;debugSend({event:'latency-reset'});}
+ if(path.startsWith('/api/replies')&&requestGeneration===generation){
+  const responseAt=performance.now(),post=room?.tweet,g=generation;
+  const ids=(result.messages||[]).filter(m=>!seen.has(m.id)).map(m=>String(m.id));
+  const eligible=debugHistoryReady&&!result.hasMore&&!result.stopped&&auto&&!document.hidden;
+  if(!result.hasMore)debugHistoryReady=true;
+  if(eligible&&ids.length)requestAnimationFrame(()=>requestAnimationFrame(()=>{
+   if(g!==generation||room?.tweet!==post||!auto||document.hidden)return;
+   const rendered=new Set([...$('messages').querySelectorAll('[data-message-id]')].map(el=>el.getAttribute('data-message-id')));
+   if(!ids.every(id=>rendered.has(id)))return;
+   const displayedAt=performance.now();debugSend({event:'latency-sample',requestId,post,ids,count:ids.length,requestMs:responseAt-requestStart,renderMs:displayedAt-responseAt,ms:displayedAt-requestStart,at:Date.now()});
   }));
+  else if(!eligible)debugSend({event:'latency-status',status:'첫 기록·이전 기록·종료된 방송·자동 스크롤 해제·백그라운드 상태는 측정에서 제외해요.'});
  }
  if(path.startsWith('/api/resolve')&&result.handle&&!groups.flatMap(g=>g[2]).some(m=>m[1]===result.handle)){$('selectedName').textContent=result.handle;$('selectedHandle').textContent='테스트 계정';avatar($('selectedAvatar'),result.handle,result.avatar,result.state==='Running');}
  return result;

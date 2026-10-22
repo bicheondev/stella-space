@@ -155,8 +155,18 @@ test('test chat deletion requires admin origin and preserves member and unknown 
 
 test('debug latency displays mean and standard deviation and resets empty measurements',()=>{
  const html=readFileSync(new URL('../server/debug.html',import.meta.url),'utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
- const elements=new Map(['chatLatency','latencyDetail'].map(id=>[id,{textContent:''}]));const ctx=vm.createContext({document:{getElementById:id=>elements.get(id)}});
+ const elements=new Map(['chatLatency','latencyDetail','latencyStages'].map(id=>[id,{textContent:''}]));const ctx=vm.createContext({document:{getElementById:id=>elements.get(id)}});
  const start=script.indexOf('const $=');vm.runInContext(script.slice(start,script.indexOf('function updateClock')),ctx);
- vm.runInContext('latencySamples=[100,300];renderLatency()',ctx);assert.equal(elements.get('chatLatency').textContent,'0.200초 ± 0.100초');assert.match(elements.get('latencyDetail').textContent,/2회 측정/);
+ vm.runInContext('latencySamples=[{ms:100,requestMs:80,renderMs:20,count:2},{ms:300,requestMs:260,renderMs:40,count:1}];renderLatency()',ctx);assert.equal(elements.get('chatLatency').textContent,'0.200초 ± 0.100초');assert.match(elements.get('latencyDetail').textContent,/2회 요청 · 3개 답글/);
  vm.runInContext('latencySamples=[];renderLatency()',ctx);assert.equal(elements.get('chatLatency').textContent,'—');
+});
+
+test('debug latency matches fresh reply IDs in the same response and never pairs a count with later chat',async()=>{
+ const {debugChatScript}=await import('../server/debug-chat.js');const events=[],frames=[],rendered=new Set(),seen=new Set();let now=0;
+ const responses=[{total:10,messages:[{id:'1'}]},{total:11,messages:[]},{total:11,messages:[{id:'2'}]}];
+ const ctx=vm.createContext({api:async()=>{now+=100;return responses.shift()},crypto:{randomUUID:()=>String(now)},performance:{now:()=>now},Date,location:{origin:'https://test'},parent:{postMessage:e=>events.push(e)},generation:1,room:{tweet:'12345'},seen,auto:true,document:{hidden:false},requestAnimationFrame:fn=>frames.push(fn),$:()=>({querySelectorAll:()=>[...rendered].map(id=>({getAttribute:()=>id}))})});
+ vm.runInContext(debugChatScript.slice(0,debugChatScript.indexOf('const debugButton=')),ctx);
+ const run=async id=>{await vm.runInContext("api('/api/replies?id=12345')",ctx);if(id){seen.add(id);rendered.add(id)}while(frames.length){now+=16;frames.shift()()}};
+ await run('1');await run();assert.equal(events.filter(e=>e.event==='latency-sample').length,0);
+ await run('2');const sample=events.find(e=>e.event==='latency-sample');assert.deepEqual([...sample.ids],['2']);assert.equal(sample.requestMs,100);assert.equal(sample.renderMs,32);assert.equal(sample.ms,132);
 });
