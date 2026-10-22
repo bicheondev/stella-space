@@ -53,6 +53,7 @@ test('dashboard renders real metric zeros, member state, job failures and safely
  assert(get('systemHealth').innerHTML.includes('방송 대기 중'));
  vm.runInContext("data={now:Date.now(),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'offline',source:'carry',checkedAt:new Date().toISOString(),lease_until:0},{key:'timeline:fx:HanayoHiyori',last_started_at:Date.now()-1000,last_error:'외부 조회 오류 (404)',lease_until:0}],sessions:[],errors:[]};renderOverview();",ctx);
  assert.equal(get('errorCount').textContent,0);assert(get('jobsTable').innerHTML.includes('대체 경로로 확인됨'));
+ vm.runInContext("data.collectors.push({key:'timeline:fx:TokinoMery',last_error:'외부 조회 오류 (404)',lease_until:0});renderOverview();",ctx);assert.equal(get('errorCount').textContent,0);assert(get('jobsTable').innerHTML.includes('이전 대상 · 기록 보관'));
  vm.runInContext("data.collectors[0].warning='두 경로 모두 실패';renderOverview();",ctx);assert.equal(get('errorCount').textContent,1);
 });
 test('switching provider tabs never lets a late Vercel response overwrite the GA view',async()=>{
