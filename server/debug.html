@@ -7,7 +7,7 @@
 <section class="bento"><div class="statusbar"><span id="sync">운영 기록 연결 중</span><span id="push">푸시 상태 확인 중</span></div><div class="legend"><span><i class="dot busy"></i>조회 중</span><span><i class="dot flash"></i>새 요청 관측</span><span><i class="dot good"></i>최근 성공</span><span><i class="dot bad"></i>최근 실패</span><span><i class="dot"></i>대기 / 기록 없음</span></div><small>1초마다 저장된 실행 기록을 확인합니다. 깜빡임은 패킷 단위 실시간 표시가 아니며, 짧은 요청은 완료 후 관측될 수 있습니다. 셀을 누르면 상세 정보를 볼 수 있어요.</small></section>
 <section class="bento"><h2>Space 온라인 / 오프라인 감지</h2><p class="muted">가로: 멤버 · 세로: 각 서비스. 푸시는 전체 연결이며 멤버별 직접 조회가 아닙니다.</p><div class="scroll" id="detection"></div></section>
 <section class="bento"><h2>Space 채팅 수집 감지</h2><p class="muted">방송 종료 시 수집 중지 · CarryFeed 답글 수집은 미지원</p><div class="scroll" id="chatCollection"></div></section>
-<section class="bento"><h2>실시간 오류 로그 <small id="errorCount"></small></h2><p class="muted">서버 최근 100건 + 이 화면의 테스트 오류 · 1초 자동 갱신 · 최신순</p><div id="errorFeedStatus" role="status"></div><div id="errorLog" style="max-height:380px;overflow:auto"></div></section><section class="bento"><h2>선택한 작업 상세</h2><div id="detail" class="detail" aria-live="polite">확인할 셀을 눌러 주세요.</div></section>
+<section class="bento"><h2>실시간 오류 로그 <small id="errorCount"></small></h2><p class="muted">서버 최근 100건 + 이 화면의 테스트 오류 · 1초 자동 갱신 · 최신순</p><label style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" id="hideFxTimelineErrors">FxTwitter 게시물 탐색 오류 숨기기 (채팅 수집 오류는 표시)</label><div id="errorFeedStatus" role="status"></div><div id="errorLog" style="max-height:380px;overflow:auto"></div></section><section class="bento"><h2>선택한 작업 상세</h2><div id="detail" class="detail" aria-live="polite">확인할 셀을 눌러 주세요.</div></section>
 </div><aside class="chat" aria-label="서비스와 동일한 채팅 화면"><iframe id="chat" src="/api/admin/debug-chat" title="Space 테스트 채팅" referrerpolicy="no-referrer"></iframe></aside></main>
 <script>
 const names=[['강지','GANGZIIII'],['아야츠노 유니','AyatsunoYuni'],['사키하네 후야','SakihaneHuya'],['네네코 마시로','NenekoMashiro'],['아라하시 타비','ArahashiTabi'],['시라유키 히나','ShirayukiHina_'],['아카네 리제','AkaneLize'],['아오쿠모 린','AokumoRin'],['텐코 시부키','TenkoShibuki'],['하나코 나나','HanakoNana_'],['유즈하 리코','YuzuhaRiko'],['시즈키 토아','ShizukiToa_'],['코가네 랑','CoganeRang'],['하나요 히요리','HanayoHiyori'],['토키노 메리','TokinoMary']];
@@ -23,7 +23,7 @@ function recordLocalError(key,error,at=Date.now()){
  if(!error)return;const signature=key+':'+error;if(Date.now()-(errorSeen.get(signature)||0)<30000)return;errorSeen.set(signature,Date.now());if(errorSeen.size>300)errorSeen.delete(errorSeen.keys().next().value);localErrors.unshift({id:'local-'+at+'-'+localErrors.length,key,error:String(error),at,local:true,handle:custom?.handle});localErrors.splice(50);renderErrors();
 }
 function renderErrors(){
- const records=[...(snapshot.errors||[]),...localErrors].sort((a,b)=>b.at-a.at).slice(0,150),signature=JSON.stringify(records);$('errorCount').textContent=records.length+'건';if(signature===errorSignature)return;errorSignature=signature;
+ const allRecords=[...(snapshot.errors||[]),...localErrors],hideFx=$('hideFxTimelineErrors')?.checked,filtered=allRecords.filter(e=>!hideFx||!/^timeline:fx:/.test(e.key)),hidden=allRecords.length-filtered.length;const records=filtered.sort((a,b)=>b.at-a.at).slice(0,150),signature=JSON.stringify([!!hideFx,records]);$('errorCount').textContent=records.length+'건'+(hidden?' · '+hidden+'건 숨김':'');if(signature===errorSignature)return;errorSignature=signature;
  $('errorLog').innerHTML=records.length?records.map(e=>{const member=names.find(n=>String(e.key).toLowerCase().endsWith(':'+n[1].toLowerCase()));return '<article style="padding:12px 0;border-bottom:1px solid #2f3336;overflow-wrap:anywhere"><div><span style="color:#ff8280">'+esc(errorProvider(e.key,e.error))+'</span> · '+esc(member?.[0]||e.handle||'공유 작업')+' <small>'+esc(when(e.at))+' · '+(e.local?'브라우저 테스트':'서버 기록')+'</small></div><div style="margin-top:5px;white-space:pre-wrap">'+esc(e.error)+'</div><small>'+esc(e.key)+'</small></article>';}).join(''):'<p class="muted">저장된 오류가 없습니다. 새 오류가 발생하면 자동으로 표시됩니다.</p>';
 }
 function cell(job,label,extra=''){
@@ -52,5 +52,5 @@ addEventListener('message',e=>{if(e.origin!==location.origin||e.source!==$('chat
  if(d.event==='response'&&d.path.startsWith('/api/resolve')&&d.result?.handle){custom=d.result;render();}
  if(d.event==='failure'){recordLocalError(d.path,d.error,d.at);$('detail').textContent='테스트 요청 실패\n'+d.path+'\n'+d.error+'\n응답 시간: '+(lastRequest.elapsed??'—')+'ms';}
  else if(d.path.startsWith('/api/resolve'))$('detail').textContent='URL 연결 결과\n계정: '+(d.result.handle||'확인 중')+'\nSpace: '+(d.result.id||'확인 중')+'\n상태: '+(d.result.state||'확인 중')+'\n응답 시간: '+(lastRequest.elapsed??'—')+'ms';
-});load();loadPush();
+});$('hideFxTimelineErrors').onchange=renderErrors;load();loadPush();
 </script></html>

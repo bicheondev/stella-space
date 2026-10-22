@@ -128,4 +128,6 @@ test('debug live error feed escapes upstream text and deduplicates repeated brow
  vm.runInContext(script.slice(script.indexOf('const esc='),script.indexOf('function cell(')),ctx);
  vm.runInContext("renderErrors();recordLocalError('x-notifications','푸시 연결 실패');recordLocalError('x-notifications','푸시 연결 실패')",ctx);
  assert.match(elements.get('errorLog').innerHTML,/FxTwitter/);assert.match(elements.get('errorLog').innerHTML,/&lt;img/);assert(!elements.get('errorLog').innerHTML.includes('<img'));assert.equal(vm.runInContext('localErrors.length',ctx),1);assert.match(elements.get('errorCount').textContent,/2건/);
+ vm.runInContext("snapshot.errors.push({id:2,key:'replies:fxtwitter:123',at:Date.now(),error:'reply failed'});$('hideFxTimelineErrors').checked=true;renderErrors()",ctx);assert(!elements.get('errorLog').innerHTML.includes('timeline:fx:'));assert(elements.get('errorLog').innerHTML.includes('replies:fxtwitter:123'));assert.match(elements.get('errorCount').textContent,/1건 숨김/);
+ vm.runInContext("$('hideFxTimelineErrors').checked=false;renderErrors()",ctx);assert(elements.get('errorLog').innerHTML.includes('timeline:fx:AyatsunoYuni'));
 });
