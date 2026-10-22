@@ -131,3 +131,11 @@ test('debug live error feed escapes upstream text and deduplicates repeated brow
  vm.runInContext("snapshot.errors.push({id:2,key:'replies:fxtwitter:123',at:Date.now(),error:'reply failed'});$('hideFxTimelineErrors').checked=true;renderErrors()",ctx);assert(!elements.get('errorLog').innerHTML.includes('timeline:fx:'));assert(elements.get('errorLog').innerHTML.includes('replies:fxtwitter:123'));assert.match(elements.get('errorCount').textContent,/1건 숨김/);
  vm.runInContext("$('hideFxTimelineErrors').checked=false;renderErrors()",ctx);assert(elements.get('errorLog').innerHTML.includes('timeline:fx:AyatsunoYuni'));
 });
+
+test('overview counts archived replies for test posts without roster broadcast sessions',async()=>{
+ process.env.OPERATIONS_SECRET='test-private-secret';const {client,db}=await fixture();try{
+ await client.execute({sql:'INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)',args:['999','reply1',JSON.stringify({id:'reply1'})]});
+ const page=await operations({headers:{}},url('/ops-test-private-secret'),null),cookie=page.headers.get('set-cookie').split(';')[0];
+ const data=await(await operations({headers:{cookie}},url('/api/admin/overview'),db)).json();assert.equal(data.sessions.length,0);assert.deepEqual(data.archives,[{post_id:'999',messages:1}]);
+ }finally{client.close()}
+});
