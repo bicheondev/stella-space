@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {saveXSession,notificationConfig,notificationStatus,receiveNotificationEvent,validateXSession,collectorAuthorized} from '../server/x-notifications.js';
-import {notificationPosts,notificationFrame} from '../scripts/x-notifications.mjs';
+import {notificationPosts,notificationFrame,syncFollowNotifications} from '../scripts/x-notifications.mjs';
 import {ingestNotificationPosts} from '../worker/index.js';
 import {operations} from '../server/operations.js';
 function fixture(){const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../server/session-schema.sql',import.meta.url),'utf8'));return{sqlite,db:{prepare(sql){return{bind(...args){return{async first(){return sqlite.prepare(sql).get(...args)||null},async all(){return{results:sqlite.prepare(sql).all(...args)}}}}}}}};}
@@ -37,4 +37,11 @@ test('ingestion deduplicates notifications and only a successful recent notifica
 });
 test('retired verification endpoint falls back to the current authenticated settings endpoint',async()=>{
  process.env.OPERATIONS_SECRET='test-ops-secret';const{sqlite,db}=fixture();try{let calls=0;await saveXSession(db,{...session,userId:'12345'},{fetcher:async url=>{calls++;return url.includes('verify_credentials')?new Response('',{status:404}):Response.json({screen_name:'checkerun23'})}});assert.equal(calls,2);assert.equal((await notificationConfig(db)).userId,'12345');}finally{sqlite.close()}
+});
+
+test('follow setup preserves existing settings and respects retry-after without repeated writes',async()=>{
+ const calls=[];const state={relationship:{source:{following:true,notifications_enabled:true}}};
+ const result=await syncFollowNotifications({}, {targets:['GANGZIIII','HanayoHiyori','TokinoMary'],now:1000,headersFor:async()=>({}),fetcher:async(url,options)=>{calls.push({url,method:options.method});if(url.includes('target_screen_name=GANGZIIII'))return Response.json(state);if(url.includes('friendships/show'))return Response.json({relationship:{source:{following:false,notifications_enabled:false}}});return Response.json({errors:[{code:161}]},{status:429,headers:{'retry-after':'3600'}});}});
+ assert.deepEqual(result.enabled,['GANGZIIII']);assert.deepEqual(result.pending,['HanayoHiyori','TokinoMary']);assert.equal(result.retryAt,3601000);assert.equal(calls.filter(c=>c.method==='POST').length,1);
+ const skipped=await syncFollowNotifications({followSetup:result},{targets:['GANGZIIII','HanayoHiyori','TokinoMary'],now:2000,fetcher:async()=>{throw Error('must not retry before reset')}});assert.deepEqual(skipped,result);
 });

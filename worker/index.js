@@ -89,7 +89,7 @@ export async function ingestNotificationPosts(db,posts){
 }
 async function discoverTimeline(db,handle){
  let prior,errors=[];
- const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind().first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
+ const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') AND json_extract(payload,'$.lastScanAt')>?1 ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind(Date.now()-45000).first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
  const pushed=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('notification-posts:'+handle).first();let notificationPosts=[];try{notificationPosts=JSON.parse(pushed?.payload||'{}').posts||[]}catch{}
  const cached=await db.prepare("SELECT payload FROM collector_entries WHERE key IN (?1,?2) AND payload IS NOT NULL ORDER BY json_extract(payload,'$.checkedAt') DESC LIMIT 1").bind('timeline:fx:'+handle,'timeline:carry:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
  if(['push','polling'].includes(watcher.mode)&&Date.now()-Number(watcher.lastScanAt||0)<45000&&timeline&&Date.now()-Date.parse(timeline.checkedAt)<60000)return{posts:[...notificationPosts,...timeline.posts],source:'x-notifications',fresh:true};

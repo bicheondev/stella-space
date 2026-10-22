@@ -130,3 +130,11 @@ test('profile falls back to CarryFeed and rechecks a known live room independent
  try{const r=await worker.fetch(new Request('https://test/api/member?handle=ShirayukiHina_'),{DB:dbA});const value=await r.json();assert.equal(value.status,'live');assert.equal(value.space,'known-live');assert.equal(value.discoverySource,'carry');assert.equal(urls.length,2);}
  finally{globalThis.fetch=original;a.close();b.close();}
 });
+
+test('healthy batched notifications reduce timeline fetches and stale inbox health restores discovery',async()=>{
+ const{a,b,dbA}=setup(),original=globalThis.fetch;let calls=0;
+ try{const now=Date.now();a.prepare("INSERT INTO collector_entries(key,payload) VALUES(?,?)").run('x-notifications:test',JSON.stringify({mode:'polling',checkedAtMs:now,lastScanAt:now}));a.prepare("INSERT INTO collector_entries(key,payload) VALUES(?,?)").run('timeline:fx:GANGZIIII',JSON.stringify({posts:[],checkedAt:new Date(now).toISOString(),source:'fx'}));globalThis.fetch=async()=>{calls++;throw Error('upstream unavailable')};
+ const first=await(await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA})).json();assert.equal(first.status,'offline');assert.equal(calls,0);
+ a.prepare("UPDATE collector_entries SET next_poll_at=0 WHERE key='member:v2:GANGZIIII'").run();a.prepare("UPDATE collector_entries SET payload=? WHERE key='x-notifications:test'").run(JSON.stringify({mode:'polling',lastScanAt:now-60000}));await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert(calls>0);
+ }finally{globalThis.fetch=original;a.close();b.close()}
+});
