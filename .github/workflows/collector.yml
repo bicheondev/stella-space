@@ -5,13 +5,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: space-collector
-  cancel-in-progress: false
+# Runs intentionally overlap so the next runner starts before this one stops.
+# Collection ownership and rate budgets are coordinated in the shared database.
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
