@@ -1,8 +1,8 @@
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {encryptToken,decryptToken} from './visitor-analytics.js';
 import {ingestNotificationPosts} from '../worker/index.js';
-export const X_BEARER='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-export function xHeaders(session){return{authorization:'Bearer '+X_BEARER,cookie:`auth_token=${session.auth_token}; ct0=${session.ct0}`,'x-csrf-token':session.ct0,'x-twitter-auth-type':'OAuth2Session','x-twitter-active-user':'yes','user-agent':'Mozilla/5.0','content-type':'application/json',origin:'https://x.com',referer:'https://x.com/'};}
+export const X_BEARER='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+export function xHeaders(session){return{authorization:'Bearer '+X_BEARER,cookie:`auth_token=${session.auth_token}; ct0=${session.ct0}`,'x-csrf-token':session.ct0,'x-twitter-auth-type':'OAuth2Session','x-twitter-active-user':'yes','user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36','x-twitter-client-language':'en',accept:'*/*','content-type':'application/json',origin:'https://x.com',referer:'https://x.com/'};}
 export function validateXSession(body){for(const key of ['auth_token','ct0'])if(typeof body?.[key]!=='string'||! /^[a-zA-Z0-9%_-]{16,1024}$/.test(body[key]))throw Error('X 로그인 세션 형식을 확인해 주세요.');return{auth_token:body.auth_token,ct0:body.ct0};}
 export async function saveXSession(db,body,{fetcher=fetch}={}){
  const session=validateXSession(body);const r=await fetcher('https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_email=false',{headers:xHeaders(session),redirect:'error',signal:AbortSignal.timeout(15000)});
