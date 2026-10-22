@@ -5,3 +5,9 @@ node_modules/
 .wrangler/
 *.sqlite
 *.sqlite-*
+
+.vercel/
+public/
+.env*
+!.env.example
+.vercel

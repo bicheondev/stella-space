@@ -4,14 +4,14 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot} from '../worker/index.js';
+import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot,collectLiveRooms} from '../worker/index.js';
 const migration=readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8');
 function binding(sqlite){
  return {
   prepare(sql){
    return {
     bind(...args){
-     return {async first(){return sqlite.prepare(sql).get(...args)||null;}};
+     return {async first(){return sqlite.prepare(sql).get(...args)||null;},async all(){return{results:sqlite.prepare(sql).all(...args)};}};
     }
    };
   }
@@ -87,4 +87,22 @@ test('reply cadence starts at request time without adding response time',async()
  await sharedCollect(dbA,'cadence',100,async()=>{now=1500;return{messages:[]};},{clock:()=>now,startCadence:true});
  assert.equal(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='cadence'").get().next_poll_at,1100);
  a.close();b.close();
+});
+
+test('one visitor collects every live room once across workers and isolates failures',async()=>{
+ const{a,b,dbA,dbB}=setup(),now=Date.now();
+ const put=(key,payload)=>a.prepare('INSERT INTO collector_entries (key,payload,last_started_at,next_poll_at) VALUES (?,?,?,?)').run(key,JSON.stringify(payload),now,now+60000);
+ for(const[handle,id,state]of [['one','111','Running'],['two','222','Running'],['ended','333','Ended']]){
+  put('member:v2:'+handle,{handle,status:'live',space:'room'+id,postUrl:'https://x.com/i/status/'+id});put('space:room'+id,{state});
+ }
+ put('member:v2:offline',{handle:'offline',status:'offline',space:'room444',postUrl:'https://x.com/i/status/444'});
+ const original=globalThis.fetch,calls=[];let release;const gate=new Promise(r=>release=r);
+ globalThis.fetch=async url=>{calls.push(String(url));await gate;if(String(url).includes('/222?'))throw Error('room two unavailable');return Response.json({code:200,replies:[{id:'reply',type:'status',replying_to:{status:'111'},text:'new reply'}]});};
+ try{
+  const winner=collectLiveRooms(dbA);await new Promise(r=>setTimeout(r,100));
+  const second=await collectLiveRooms(dbB);assert.equal(second.collecting,true);
+  release();const result=await winner;assert.equal(result.rooms.length,3);assert.equal(result.rooms.find(r=>r.handle==='ended').stopped,true);assert.match(result.rooms.find(r=>r.handle==='two').error,/unavailable/);
+  assert.equal(calls.length,2);assert.ok(calls.every(url=>!url.includes('333')&&!url.includes('444')));
+  const stored=JSON.parse(a.prepare("SELECT payload FROM collector_entries WHERE key='replies:fxtwitter:111'").get().payload);assert.equal(stored.messages[0].id,'reply');
+ }finally{release();globalThis.fetch=original;a.close();b.close();}
 });
