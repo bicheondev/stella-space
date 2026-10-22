@@ -45,6 +45,12 @@ test('dashboard renders real metric zeros, member state, job failures and safely
  const ctx=vm.createContext({document:{getElementById:get,querySelectorAll:()=>[],addEventListener(){},hidden:false},setInterval(){},Date,Number,String,Math,JSON,console});new vm.Script(script).runInContext(ctx);
  vm.runInContext(`data={now:Date.parse('2026-10-22T10:00:00Z'),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'live',checkedAt:'2026-10-22T09:59:59Z',next_poll_at:0,lease_until:0},{key:'replies:fxtwitter:123',last_error:'<script>bad</script>',failure_count:2,next_poll_at:0,lease_until:0}],sessions:[{handle:'HanayoHiyori',post_id:'123',messages:45}],errors:[]};renderOverview();analytics={status:'connected',checkedAt:Date.now(),totals:{visitors:0,pageviews:0},daily:[{timestamp:'2026-10-22T00:00:00Z',visitors:0,pageviews:0}],countries:[],referrers:[],pages:[]};renderAnalytics();`,ctx);
  assert.equal(get('liveMembers').textContent,'1');assert.equal(get('storedMessages').textContent,'45');assert.equal(get('todayVisitors').textContent,'0');assert(get('membersTable').innerHTML.includes('하나요 히요리'));assert(get('jobsTable').innerHTML.includes('이번 확인을 마치지 못했어요'));assert(get('logAttention').innerHTML.includes('다음 동작'));assert(!get('jobsTable').innerHTML.includes('<script>bad'));assert(get('overviewChart').innerHTML.includes('<svg'));
+ vm.runInContext("data={now:Date.now(),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'offline',checkedAt:new Date().toISOString(),lease_until:Date.now()+10000}],sessions:[],errors:[]};renderOverview();",ctx);
+ assert(get('systemHealth').innerHTML.includes('방송 대기 중'));assert(!get('systemHealth').innerHTML.includes('답글 조회 중'));
+ vm.runInContext("data.collectors.push({key:'replies:fxtwitter:123',lease_until:Date.now()+10000});renderOverview();",ctx);
+ assert(get('systemHealth').innerHTML.includes('1개 답글 조회 중'));
+ vm.runInContext("data.sessions=[{handle:'HanayoHiyori',post_id:'123',state:'Ended',messages:0}];renderOverview();",ctx);
+ assert(get('systemHealth').innerHTML.includes('방송 대기 중'));
 });
 test('switching provider tabs never lets a late Vercel response overwrite the GA view',async()=>{
  const html=readFileSync(new URL('../server/operations.html',import.meta.url),'utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/renderAnalytics\(\);load\(\);loadAnalytics\(\);loadAnalytics\(analyticsProvider[\s\S]*$/,'');
