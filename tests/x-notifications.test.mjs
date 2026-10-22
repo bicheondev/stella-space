@@ -35,3 +35,6 @@ test('ingestion deduplicates notifications and only a confirmed live push enable
  await receiveNotificationEvent(db,{mode:'error'});assert.equal((await notificationStatus(db)).healthy,false);
  }finally{sqlite.close()}
 });
+test('retired verification endpoint falls back to the current authenticated settings endpoint',async()=>{
+ process.env.OPERATIONS_SECRET='test-ops-secret';const{sqlite,db}=fixture();try{let calls=0;await saveXSession(db,{...session,userId:'12345'},{fetcher:async url=>{calls++;return url.includes('verify_credentials')?new Response('',{status:404}):Response.json({screen_name:'checkerun23'})}});assert.equal(calls,2);assert.equal((await notificationConfig(db)).userId,'12345');}finally{sqlite.close()}
+});

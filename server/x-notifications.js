@@ -6,7 +6,10 @@ export function xHeaders(session){return{authorization:'Bearer '+X_BEARER,cookie
 export function validateXSession(body){for(const key of ['auth_token','ct0'])if(typeof body?.[key]!=='string'||! /^[a-zA-Z0-9%_-]{16,1024}$/.test(body[key]))throw Error('X 로그인 세션 형식을 확인해 주세요.');return{auth_token:body.auth_token,ct0:body.ct0};}
 export async function saveXSession(db,body,{fetcher=fetch}={}){
  const session=validateXSession(body);const r=await fetcher('https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_email=false',{headers:xHeaders(session),redirect:'error',signal:AbortSignal.timeout(15000)});
- if(!r.ok)throw Error('X 봇 인증 확인 실패 ('+r.status+')');const user=await r.json();if(!/^\d+$/.test(user.id_str||'')||!/^\w{1,15}$/.test(user.screen_name||''))throw Error('X 봇 계정을 확인하지 못했습니다.');
+ let user;
+ if(r.status===404){const fallback=await fetcher('https://api.x.com/1.1/account/settings.json',{headers:xHeaders(session),redirect:'error',signal:AbortSignal.timeout(15000)});if(!fallback.ok)throw Error('X 봇 인증 확인 실패 ('+fallback.status+')');const settings=await fallback.json();user={id_str:/^\d{1,25}$/.test(body.userId||'')?body.userId:'',screen_name:settings.screen_name};}
+ else{if(!r.ok)throw Error('X 봇 인증 확인 실패 ('+r.status+')');user=await r.json();}
+ if(!/^\d+$/.test(user.id_str||'')||!/^\w{1,15}$/.test(user.screen_name||''))throw Error('X 봇 계정을 확인하지 못했습니다.');
  if(body.expectedHandle&&user.screen_name.toLowerCase()!==body.expectedHandle.toLowerCase())throw Error('지정한 봇 계정과 로그인 계정이 다릅니다.');
  const value={...session,userId:user.id_str,handle:user.screen_name,connectedAt:Date.now()};
  await db.prepare(`INSERT INTO operations_settings(key,value) VALUES('x_notification_config',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key`).bind(encryptToken(JSON.stringify(value))).first();return{handle:value.handle};
