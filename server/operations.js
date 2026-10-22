@@ -1,7 +1,7 @@
 import {webPushControl,saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
 import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
-import {initialPage} from '../worker/index.js';
+import {initialPage,memberHandles} from '../worker/index.js';
 import {debugChatScript} from './debug-chat.js';
 const debugPage=readFileSync(new URL('./debug.html',import.meta.url),'utf8');
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
@@ -21,6 +21,16 @@ export async function operations(req,url,db){
  }
  if(secret&&url.pathname==='/ops-'+secret){return new Response(page.replace('__DEBUG_PATH__','/ops-'+secret+'/debug'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
  if(url.pathname==='/api/visit')return json({error:'Removed'},410);
+ if(url.pathname==='/api/admin/test-chats'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(req.method!=='DELETE')return json({},405);
+  if(req.headers.origin!==url.origin)return json({},403);
+  const rows=(await db.prepare("SELECT payload FROM collector_entries WHERE key LIKE 'resolve:post:%' OR key LIKE 'resolve:space:%'").bind().all()).results;
+  const protectedIds=new Set((await db.prepare('SELECT post_id FROM broadcast_sessions').bind().all()).results.map(r=>r.post_id));
+  const ids=new Set();for(const row of rows){let p;try{p=JSON.parse(row.payload)}catch{continue}if(p?.handle&&/^\d{2,20}$/.test(p.tweet||'')&&!memberHandles.some(h=>h.toLowerCase()===p.handle.toLowerCase())&&!protectedIds.has(p.tweet))ids.add(p.tweet);}
+  let deleted=0;for(const id of ids){deleted+=(await db.prepare('DELETE FROM broadcast_messages WHERE post_id=?1 RETURNING id').bind(id).all()).results.length;await db.prepare('DELETE FROM collector_entries WHERE key=?1 RETURNING key').bind('replies:fxtwitter:'+id).all();}
+  return json({ok:true,deleted,rooms:ids.size});
+ }
  if(url.pathname==='/api/admin/errors'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method!=='DELETE')return json({},405);

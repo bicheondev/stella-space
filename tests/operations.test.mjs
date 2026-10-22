@@ -139,3 +139,16 @@ test('overview counts archived replies for test posts without roster broadcast s
  const data=await(await operations({headers:{cookie}},url('/api/admin/overview'),db)).json();assert.equal(data.sessions.length,0);assert.deepEqual(data.archives,[{post_id:'999',messages:1}]);
  }finally{client.close()}
 });
+
+test('test chat deletion requires admin origin and preserves member and unknown archives',async()=>{
+ process.env.OPERATIONS_SECRET='test-private-secret';const{client,db}=await fixture();
+ try{
+ const page=await operations({headers:{}},url('/ops-test-private-secret'),db),cookie=page.headers.get('set-cookie').split(';')[0];
+ for(const [id,handle]of [['12345','ExternalTester'],['23456','ShirayukiHina_']])await client.execute({sql:'INSERT INTO collector_entries(key,payload) VALUES(?,?)',args:['resolve:post:'+id,JSON.stringify({tweet:id,handle})]});
+ for(const id of ['12345','23456','34567'])await client.execute({sql:'INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)',args:[id,'1','{}']});
+ assert.equal((await operations({method:'DELETE',headers:{}},url('/api/admin/test-chats'),db)).status,404);
+ assert.equal((await operations({method:'DELETE',headers:{cookie,origin:'https://evil.example'}},url('/api/admin/test-chats'),db)).status,403);
+ const result=await(await operations({method:'DELETE',headers:{cookie,origin:url('/').origin}},url('/api/admin/test-chats'),db)).json();assert.equal(result.deleted,1);
+ assert.deepEqual((await client.execute('SELECT post_id FROM broadcast_messages ORDER BY post_id')).rows.map(r=>r.post_id),['23456','34567']);
+ }finally{client.close()}
+});
