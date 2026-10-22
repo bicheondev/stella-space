@@ -62,3 +62,9 @@ test('initial HTML renders recent shared member status without waiting for exter
  row.checkedAt=new Date(Date.now()-120000).toISOString();const stale=await initialPage(db,'/ShirayukiHina_');assert(stale.includes('class="status unknown" id="selectedStatus">확인 중</span>'));
  row.status='offline';row.checkedAt=new Date().toISOString();assert((await initialPage(db,'/ShirayukiHina_')).includes('class="status offline" id="selectedStatus">오프라인</span>'));
 });
+
+test('an unregistered Space creator replaces the previous selection and live avatar state',async()=>{
+ const {ctx,elements}=await setup();ctx.response={id:'externalroom',tweet:null,handle:'Sikha__Patel',state:'Running',avatar:'https://pbs.twimg.com/profile_images/test.jpg',currentParticipants:88};
+ vm.runInContext('api=async()=>response',ctx);await vm.runInContext("connect('https://x.com/i/spaces/externalroom')",ctx);
+ assert.equal(vm.runInContext('selected',ctx),'Sikha__Patel');assert.equal(vm.runInContext('statuses[selected].status',ctx),'live');assert.equal(vm.runInContext('statuses[selected].avatar',ctx),ctx.response.avatar);assert.equal(elements.get('selectedName').textContent,'Sikha__Patel');assert.match(elements.get('connection').textContent,/공유 게시물 미발견/);
+});
