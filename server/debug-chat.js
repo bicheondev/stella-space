@@ -26,6 +26,6 @@ api=async function(path){
 };
 const debugButton=document.createElement('button');debugButton.className='iconbtn';debugButton.title='Space 또는 공유 게시물 URL 테스트';debugButton.setAttribute('aria-label',debugButton.title);debugButton.textContent='🔗';
 debugButton.onclick=()=>{const value=prompt('X Space 또는 Space 공유 게시물 URL을 입력해 주세요.');if(value?.trim())connect(value.trim());};document.querySelector('.toolbar-actions').prepend(debugButton);
-$('connection').hidden=false;
+$('connection').hidden=false;$('streamInfo').hidden=false;$('listeners').hidden=false;
 addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==parent||event.data?.type!=='debug-connect')return;connect(String(event.data.url||''));});
 `;
