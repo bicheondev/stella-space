@@ -289,7 +289,7 @@ body.hide-chat-images .message-media{display:none!important}
 
 /* Footer labels remain available without relying on the browser title tooltip. */
 .tools .iconbtn[aria-label]{position:relative;overflow:visible}
-.tools .iconbtn[aria-label]::after{content:attr(aria-label);position:absolute;right:0;bottom:calc(100% + 8px);z-index:12;max-width:calc(100vw - 24px);width:max-content;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface,var(--bg));color:var(--text);box-shadow:0 2px 8px #0003;font-size:11px;font-weight:500;line-height:16px;white-space:nowrap;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease,visibility 0s .12s}
+.tools .iconbtn[aria-label]::after{content:attr(aria-label);position:absolute;right:0;bottom:calc(100% + 8px);z-index:12;max-width:calc(100vw - 24px);width:max-content;padding:3px 6px;border:0;border-radius:2px;background:rgba(73,91,105,.95);color:#fff;box-shadow:none;font-size:11px;font-weight:400;line-height:16px;white-space:nowrap;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease,visibility 0s .12s}
 .tools>.iconbtn[aria-label]::after{left:0;right:auto}
 .tools .iconbtn[aria-label]:hover::after,.tools .iconbtn[aria-label]:focus-visible::after{opacity:1;visibility:visible;transform:translateY(0);transition-delay:.25s}
 @media(prefers-reduced-motion:reduce){.tools .iconbtn[aria-label]::after{transform:none;transition:none}}
