@@ -70,14 +70,14 @@ async function reserveCarrySlot(db){
  if(!row)throw deferred('보조 게시물 조회 대기 중',now+5000);
  const delay=row.next_poll_at-slot-now;if(delay>0)await new Promise(r=>setTimeout(r,delay));
 }
-async function timelineSource(db,handle,source){
- return sharedCollect(db,'timeline:'+source+':'+handle,source==='fx'?30000:60000,async()=>{
+async function timelineSource(db,handle,source,minimumIntervalMs=0){
+ return sharedCollect(db,'timeline:'+source+':'+handle,Math.max(minimumIntervalMs,source==='fx'?30000:60000),async()=>{
   const url=source==='fx'?'https://api.fxtwitter.com/2/profile/':'https://api.carryfeed.com/api/profile/';
   if(source==='carry'){await providerReady(db,'carry');await reserveCarrySlot(db);await providerReady(db,'carry');}
   let d;try{d=await(source==='fx'?fxJson(db,url+handle+'/statuses?count=5'):json(url+handle+'/statuses?count=5'));}catch(e){if(source==='carry')await providerFailure(db,'carry',e);throw e;}
   if(d.code!==200||!Array.isArray(d.results))throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
   return{posts:d.results,source};
- },{failureBackoff:failures=>Math.min(300000,30000*2**Math.min(failures-1,4))});
+ },{minimumIntervalMs,failureBackoff:failures=>Math.max(minimumIntervalMs,Math.min(300000,30000*2**Math.min(failures-1,4)))});
 }
 export async function ingestNotificationPosts(db,posts){
  let accepted=0;
@@ -92,7 +92,7 @@ export async function ingestNotificationPosts(db,posts){
 }
 async function discoverTimeline(db,handle){
  let prior,errors=[];
- const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') AND (json_extract(payload,'$.lastScanAt')>?1 OR (json_extract(payload,'$.pushConnected')=1 AND json_extract(payload,'$.checkedAtMs')>?2)) ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind(Date.now()-45000,Date.now()-30000).first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
+ const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') AND (json_extract(payload,'$.lastScanAt')>?1 OR (json_extract(payload,'$.pushConnected')=1 AND json_extract(payload,'$.checkedAtMs')>?2)) ORDER BY CASE WHEN json_extract(payload,'$.mode')='push' AND json_extract(payload,'$.pushConnected')=1 AND json_extract(payload,'$.checkedAtMs')>?2 THEN 0 ELSE 1 END,json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind(Date.now()-45000,Date.now()-30000).first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
  const pushed=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('notification-posts:'+handle).first();let notificationPosts=[];try{notificationPosts=JSON.parse(pushed?.payload||'{}').posts||[]}catch{}
  const cached=await db.prepare("SELECT payload FROM collector_entries WHERE key IN (?1,?2) AND payload IS NOT NULL ORDER BY json_extract(payload,'$.checkedAt') DESC LIMIT 1").bind('timeline:fx:'+handle,'timeline:carry:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
  const pushHealthy=watcher.mode==='push'&&watcher.pushConnected===true&&Date.now()-Number(watcher.checkedAtMs||0)<30000;
@@ -100,7 +100,7 @@ async function discoverTimeline(db,handle){
  const auditMs=pushHealthy?300000+memberHandles.indexOf(handle)*2000:inboxHealthy?60000:30000;
  if(timeline&&Date.now()-Date.parse(timeline.checkedAt)<auditMs)return{posts:[...notificationPosts,...timeline.posts],source:pushHealthy||inboxHealthy?'x-notifications':timeline.source,fresh:true};
  for(const source of ['fx','carry']){
-  try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,posts:[...notificationPosts,...feed.posts],fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
+  try{const feed=await timelineSource(db,handle,source,pushHealthy?auditMs:0);if(feed.posts){if(!feed.stale)return{...feed,posts:[...notificationPosts,...feed.posts],fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
  }
  return{posts:[...notificationPosts,...(prior?.posts||[])],source:notificationPosts.length?'x-notifications':prior?.source,fresh:false,warning:errors.join(' · ')};
 }
@@ -166,14 +166,15 @@ export async function sharedCollect(db,key,ttl,produce,options={}){
   const read=()=>db.prepare('SELECT * FROM collector_entries WHERE key = ?1').bind(key).first();
   let row=await read();
   const output=(r,collecting=false)=>r?.payload?{...JSON.parse(r.payload),shared:true,collecting,stale:!!r.last_error,warning:r.last_error||null}:{shared:true,collecting:true,messages:[],source:key.startsWith('replies:')?key.split(':')[1]:undefined,checkedAt:null};
+  if(row&&options.minimumIntervalMs&&row.last_started_at+options.minimumIntervalMs>now){if(!row.payload&&row.last_error)throw Error(row.last_error);return output(row,row.lease_until>now);}
   if(row&&row.next_poll_at>now){if(!row.payload&&row.last_error)throw Error(row.last_error);return output(row,row.lease_until>now);}
   if(row?.lease_until>now)return output(row,true);
   const token=crypto.randomUUID();
   const acquired=await db.prepare(`INSERT INTO collector_entries (key, lease_until, lease_token, last_started_at, fetch_count)
     VALUES (?1, ?2, ?3, ?4, 1)
     ON CONFLICT(key) DO UPDATE SET lease_until=excluded.lease_until,lease_token=excluded.lease_token,last_started_at=excluded.last_started_at,fetch_count=collector_entries.fetch_count+1
-    WHERE collector_entries.next_poll_at <= ?4 AND collector_entries.lease_until <= ?4
-    RETURNING *`).bind(key,now+leaseMs,token,now).first();
+    WHERE collector_entries.next_poll_at <= ?4 AND collector_entries.lease_until <= ?4 AND collector_entries.last_started_at <= ?5
+    RETURNING *`).bind(key,now+leaseMs,token,now,now-(options.minimumIntervalMs||0)).first();
   if(!acquired)return output(await read(),true);
   try{
     let value=await produce();

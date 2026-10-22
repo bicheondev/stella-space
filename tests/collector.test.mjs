@@ -143,6 +143,7 @@ test('healthy push keeps cached discovery while a new Space notification is proc
  const{a,b,dbA}=setup(),original=globalThis.fetch,now=Date.now();let calls=0;
  try{
  a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('x-notifications:test',JSON.stringify({mode:'push',pushConnected:true,checkedAtMs:now,lastScanAt:now-120000}),0);
+ a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('x-notifications:standby',JSON.stringify({mode:'polling',checkedAtMs:now+1,lastScanAt:now}),0);
  a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('timeline:fx:GANGZIIII',JSON.stringify({posts:[],checkedAt:new Date(now-120000).toISOString(),source:'fx'}),0);
  globalThis.fetch=async()=>{calls++;throw Error('unexpected external request')};
  const first=await(await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA})).json();assert.equal(first.status,'offline');assert.equal(calls,0);
@@ -170,4 +171,16 @@ test('HTTP 200 with a provider 429 code also opens the shared cooldown',async()=
  globalThis.fetch=async()=>Response.json({code:429},{headers:{'Retry-After':'120'}});
  try{await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='budget:pause:fx'").get().next_poll_at>Date.now()+110000);assert(a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='budget:pause:carry'").get().next_poll_at>Date.now()+290000);}
  finally{globalThis.fetch=original;a.close();b.close()}
+});
+
+test('healthy push enforces five-minute discovery spacing after failure even with an old short retry deadline',async()=>{
+ const{a,b,dbA}=setup(),original=globalThis.fetch,now=Date.now();let calls=0;
+ try{
+ a.prepare('INSERT INTO collector_entries(key,payload) VALUES(?,?)').run('x-notifications:owner',JSON.stringify({mode:'push',pushConnected:true,checkedAtMs:now,lastScanAt:now}));
+ globalThis.fetch=async()=>{calls++;return new Response('',{status:404})};
+ await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert.equal(calls,2);
+ for(const source of ['fx','carry']){const row=a.prepare('SELECT * FROM collector_entries WHERE key=?').get('timeline:'+source+':GANGZIIII');assert(row.next_poll_at>=row.last_started_at+300000);}
+ a.prepare("UPDATE collector_entries SET next_poll_at=0 WHERE key IN ('member:v2:GANGZIIII','timeline:fx:GANGZIIII','timeline:carry:GANGZIIII')").run();
+ await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert.equal(calls,2);
+ }finally{globalThis.fetch=original;a.close();b.close()}
 });
