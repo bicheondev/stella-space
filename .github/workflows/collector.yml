@@ -19,5 +19,5 @@ jobs:
           node-version: '22'
       - run: node scripts/heartbeat.mjs
         env:
-          SITE_URL: https://stella-space-khaki.vercel.app
+          SITE_URL: https://stellive-space.vercel.app
           COLLECTOR_SECRET: ${{ secrets.COLLECTOR_SECRET }}

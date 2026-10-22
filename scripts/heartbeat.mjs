@@ -1,4 +1,4 @@
-const origin=process.env.SITE_URL||'https://stella-space-khaki.vercel.app';
+const origin=process.env.SITE_URL||'https://stellive-space.vercel.app';
 if(!process.env.COLLECTOR_SECRET)throw Error('COLLECTOR_SECRET is missing');
 const deadline=Date.now()+270000;
 while(Date.now()<deadline){
