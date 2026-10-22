@@ -1,3 +1,5 @@
+process.env.ADMIN_SESSION_SECRET='test-admin-session-secret';
+import{adminSessionCookie}from'../server/admin-auth.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createClient} from '@libsql/client';
@@ -11,7 +13,7 @@ test('private console removes own tracking and protects analytics read and conne
  process.env.OPERATIONS_SECRET='test-private-secret';
  const {client,db}=await fixture();try{
  for(const path of ['/api/admin/overview','/api/admin/analytics','/api/admin/analytics/connect'])assert.equal((await operations({headers:{}},url(path),db)).status,404);
- const page=await operations({headers:{}},url('/ops-test-private-secret'),null),html=await page.text();assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');const cookie=page.headers.get('set-cookie').split(';')[0];assert(authorized(cookie));assert(!authorized('ops=wrong'));assert(!authorized('ops=한'.repeat(32)));
+ const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops'),null),html=await page.text();assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');const cookie=adminSessionCookie().split(';')[0];assert(authorized(cookie));assert(!authorized('ops=wrong'));assert(!authorized('ops=한'.repeat(32)));
  assert(!html.includes('googletagmanager.com'));assert(!html.includes('sendBeacon'));assert(html.includes('view-connections'));assert(html.includes('memberSearch'));new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
  assert.equal((await operations({headers:{},method:'POST'},url('/api/visit'),db)).status,410);
  assert.equal((await operations({method:'POST',headers:{cookie,origin:'https://evil.example'},body:{token:'x'.repeat(30)}},url('/api/admin/analytics/connect'),db)).status,403);
@@ -103,7 +105,7 @@ test('error history deletion is admin-only, same-origin and bounded so newer err
  try{
  await client.execute("INSERT INTO collector_errors(at,key,error) VALUES(1,'timeline:fx:test','old'),(2,'timeline:fx:test','old'),(3,'timeline:fx:test','new')");
  await client.execute("INSERT INTO collector_entries(key,last_error) VALUES('timeline:fx:test','active failure')");
- const page=await operations({headers:{}},url('/ops-test-private-secret'),null),cookie=page.headers.get('set-cookie').split(';')[0];
+ const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops'),null),cookie=adminSessionCookie().split(';')[0];
  assert.equal((await operations({method:'DELETE',headers:{},body:{through:2}},url('/api/admin/errors'),db)).status,404);
  assert.equal((await operations({method:'DELETE',headers:{cookie,origin:'https://evil.example'},body:{through:2}},url('/api/admin/errors'),db)).status,403);
  assert.equal((await operations({method:'GET',headers:{cookie}},url('/api/admin/errors'),db)).status,405);
@@ -116,8 +118,8 @@ test('error history deletion is admin-only, same-origin and bounded so newer err
 test('debug chat requires operations authentication and reuses service chat without analytics',async()=>{
  process.env.OPERATIONS_SECRET='test-private-secret';const {client,db}=await fixture();try{
  assert.equal((await operations({method:'GET',headers:{}},url('/api/admin/debug-chat'),db)).status,404);
- const page=await operations({headers:{}},url('/ops-test-private-secret/debug'),null);assert.equal(page.status,200);assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');
- const cookie=page.headers.get('set-cookie').split(';')[0],html=await page.text();assert(html.includes('Space 온라인 / 오프라인 감지'));assert(html.includes('Space 채팅 수집 감지'));assert(html.includes("e.source!==$('chat').contentWindow"));new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+ const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops/debug'),null);assert.equal(page.status,200);assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');
+ const cookie=adminSessionCookie().split(';')[0],html=await page.text();assert(html.includes('Space 온라인 / 오프라인 감지'));assert(html.includes('Space 채팅 수집 감지'));assert(html.includes("e.source!==$('chat').contentWindow"));new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
  const chat=await operations({method:'GET',headers:{cookie}},url('/api/admin/debug-chat'),db),body=await chat.text();assert(body.includes('채팅방에 오신 것을 환영합니다!'));assert(body.includes('Space 또는 공유 게시물 URL 테스트'));assert(body.includes('event.source!==parent'));assert(!body.includes('googletagmanager'));for(const script of body.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
  }finally{client.close()}
 });
@@ -135,7 +137,7 @@ test('debug live error feed escapes upstream text and deduplicates repeated brow
 test('overview counts archived replies for test posts without roster broadcast sessions',async()=>{
  process.env.OPERATIONS_SECRET='test-private-secret';const {client,db}=await fixture();try{
  await client.execute({sql:'INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)',args:['999','reply1',JSON.stringify({id:'reply1'})]});
- const page=await operations({headers:{}},url('/ops-test-private-secret'),null),cookie=page.headers.get('set-cookie').split(';')[0];
+ const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops'),null),cookie=adminSessionCookie().split(';')[0];
  const data=await(await operations({headers:{cookie}},url('/api/admin/overview'),db)).json();assert.equal(data.sessions.length,0);assert.deepEqual(data.archives,[{post_id:'999',messages:1}]);
  }finally{client.close()}
 });
@@ -143,7 +145,7 @@ test('overview counts archived replies for test posts without roster broadcast s
 test('test chat deletion requires admin origin and preserves member and unknown archives',async()=>{
  process.env.OPERATIONS_SECRET='test-private-secret';const{client,db}=await fixture();
  try{
- const page=await operations({headers:{}},url('/ops-test-private-secret'),db),cookie=page.headers.get('set-cookie').split(';')[0];
+ const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops'),db),cookie=adminSessionCookie().split(';')[0];
  for(const [id,handle]of [['12345','ExternalTester'],['23456','ShirayukiHina_']])await client.execute({sql:'INSERT INTO collector_entries(key,payload) VALUES(?,?)',args:['resolve:post:'+id,JSON.stringify({tweet:id,handle})]});
  for(const id of ['12345','23456','34567'])await client.execute({sql:'INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)',args:[id,'1','{}']});
  assert.equal((await operations({method:'DELETE',headers:{}},url('/api/admin/test-chats'),db)).status,404);
