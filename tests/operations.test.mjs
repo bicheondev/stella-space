@@ -45,6 +45,20 @@ test('dashboard renders real metric zeros, member state, job failures and safely
  const ctx=vm.createContext({document:{getElementById:get,querySelectorAll:()=>[],addEventListener(){},hidden:false},setInterval(){},Date,Number,String,Math,JSON,console});new vm.Script(script).runInContext(ctx);
  vm.runInContext(`data={now:Date.parse('2026-10-22T10:00:00Z'),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'live',checkedAt:'2026-10-22T09:59:59Z',next_poll_at:0,lease_until:0},{key:'replies:fxtwitter:123',last_error:'<script>bad</script>',failure_count:2,next_poll_at:0,lease_until:0}],sessions:[{handle:'HanayoHiyori',post_id:'123',messages:45}],errors:[]};renderOverview();analytics={status:'connected',checkedAt:Date.now(),totals:{visitors:0,pageviews:0},daily:[{timestamp:'2026-10-22T00:00:00Z',visitors:0,pageviews:0}],countries:[],referrers:[],pages:[]};renderAnalytics();`,ctx);
  assert.equal(get('liveMembers').textContent,'1');assert.equal(get('storedMessages').textContent,'45');assert.equal(get('todayVisitors').textContent,'0');assert(get('membersTable').innerHTML.includes('하나요 히요리'));assert(get('jobsTable').innerHTML.includes('이번 확인을 마치지 못했어요'));assert(get('logAttention').innerHTML.includes('다음 동작'));assert(!get('jobsTable').innerHTML.includes('<script>bad'));assert(get('overviewChart').innerHTML.includes('<svg'));
+ for(const [key,error,expected] of [
+ ['timeline:fx:HanayoHiyori','외부 조회 오류 (404)','FxTwitter'],
+ ['timeline:carry:HanayoHiyori','외부 조회 오류 (429)','CarryFeed'],
+ ['timeline:carry:HanayoHiyori','보조 게시물 조회 대기 중','내부 수집기'],
+ ['space:abcdef','외부 조회 오류 (429)','X API'],
+ ['x-notifications:run','푸시 연결 대기','xnotif / Mozilla 푸시'],
+ ['x-notifications:run','X 알림함 조회 실패 (429)','X API'],
+ ['member:v2:HanayoHiyori','외부 조회 오류 (404) · /2/profile/test/statuses · 외부 조회 오류 (429) · /api/profile/test/statuses','FxTwitter / CarryFeed'],
+ ['member:v2:HanayoHiyori','SQLITE_ERROR','공유 저장소 (Turso)'],
+ ['member:v2:HanayoHiyori','원인 불명','수집기 · 원인 확인 중']
+ ])assert.equal(vm.runInContext('issueProvider('+JSON.stringify({key,error})+')',ctx),expected);
+ vm.runInContext("data.errors=[{id:1,key:'timeline:carry:HanayoHiyori',error:'외부 조회 오류 (429)',at:data.now}];renderOverview();",ctx);
+ assert(get('recentErrors').innerHTML.includes('CarryFeed'));assert(get('errorsTable').innerHTML.includes('발생 위치 · CarryFeed'));assert(get('logAttention').innerHTML.includes('발생 위치 · FxTwitter'));
+
  vm.runInContext("data={now:Date.now(),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'offline',checkedAt:new Date().toISOString(),lease_until:Date.now()+10000}],sessions:[],errors:[]};renderOverview();",ctx);
  assert(get('systemHealth').innerHTML.includes('방송 대기 중'));assert(!get('systemHealth').innerHTML.includes('답글 조회 중'));
  vm.runInContext("data.collectors.push({key:'replies:fxtwitter:123',lease_until:Date.now()+10000});renderOverview();",ctx);
