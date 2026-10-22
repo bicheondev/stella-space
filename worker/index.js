@@ -312,7 +312,7 @@ async function select(name,handle,i){
   let s=statuses[handle];
   if(!s?.postUrl){s=await api('/api/member?handle='+encodeURIComponent(handle));if(g!==generation)return;statuses[handle]={...statuses[handle],...s};render();}
   if(s?.postUrl){await connect(s.postUrl);}
-  else{$('title').textContent='공유 게시물을 아직 찾지 못했습니다';$('connection').textContent=s?.collecting?'◌ 공유 게시물 찾는 중':'○ 연결 대기';notice('채팅방에 오신 것을 환영합니다!');if(s?.collecting)poll=setTimeout(()=>{if(g===generation)select(name,handle,i);},1000);}
+  else{$('title').textContent='오프라인';$('connection').textContent=s?.collecting?'◌ 공유 게시물 찾는 중':'○ 연결 대기';notice('채팅방에 오신 것을 환영합니다!');if(s?.collecting)poll=setTimeout(()=>{if(g===generation)select(name,handle,i);},1000);}
  }catch(e){if(g!==generation)return;$('connection').textContent='○ 공유 게시물 조회 제한';notice(e.message,true);}
 }
 function notice(text,error=false){const n=document.createElement('div');n.className='notice'+(error?' error':'');n.textContent=text;$('messages').append(n);}
