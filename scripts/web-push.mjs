@@ -1,6 +1,8 @@
 import {AutopushClient,Decryptor} from 'xnotif';
 import {randomUUID} from 'node:crypto';
 import {signedXHeaders} from '../server/x-notifications.js';
+// Reconnect only after renewing our server lease; the upstream auto-retry can outlive ownership.
+class LeasedAutopushClient extends AutopushClient{reconnect(){}}
 export const X_VAPID='BF5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs';
 export async function registerWebPush(session,state,decryptor,{fetcher=fetch,headersFor=signedXHeaders,signal}={}){
  const path='/1.1/notifications/settings/login.json';
@@ -9,7 +11,7 @@ export async function registerWebPush(session,state,decryptor,{fetcher=fetch,hea
  const result=await response.json();if(result.errors?.length)throw Error('X가 푸시 기기 등록을 거절했습니다.');
 }
 // Explicit lifecycle: close before retry, so the library cannot reclaim a handed-off connection.
-export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState,Client=AutopushClient,createDecryptor=(...args)=>Decryptor.create(...args),register=registerWebPush}){
+export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState,Client=LeasedAutopushClient,createDecryptor=(...args)=>Decryptor.create(...args),register=registerWebPush}){
  const decryptor=await createDecryptor(state?.decryptor?.jwk,state?.decryptor?.auth);
  const channelId=state?.channelId||randomUUID();
  let client;const close=()=>client?.close();
