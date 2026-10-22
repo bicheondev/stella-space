@@ -1,3 +1,4 @@
+import {saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
 import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
@@ -11,6 +12,17 @@ export async function operations(req,url,db){
  const secret=process.env.OPERATIONS_SECRET?.trim();
  if(secret&&url.pathname==='/ops-'+secret){return new Response(page,{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
  if(url.pathname==='/api/visit')return json({error:'Removed'},410);
+ if(url.pathname==='/api/admin/x-notifications'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(req.method==='POST'){if(req.headers.origin!==url.origin)return json({},403);try{return json(await saveXSession(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch(e){return json({error:e.message},400)}}
+  if(req.method!=='GET')return json({},405);return json(await notificationStatus(db));
+ }
+ if(url.pathname==='/api/notification-config'||url.pathname==='/api/notification-event'){
+  if(!collectorAuthorized(req.headers.authorization))return json({error:'Not found'},404);
+  if(url.pathname==='/api/notification-config'){if(req.method!=='GET')return json({},405);return json({config:await notificationConfig(db)});}
+  if(req.method!=='POST')return json({},405);
+  try{return json(await receiveNotificationEvent(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch{return json({error:'알림 처리 실패'},400)}
+ }
  if(url.pathname==='/api/admin/analytics/connect'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method!=='POST')return json({},405);

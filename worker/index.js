@@ -1,4 +1,5 @@
 const members=[['','',[['강지','GANGZIIII']]],['에버리스','EVERYS',[['아야츠노 유니','AyatsunoYuni'],['사키하네 후야','SakihaneHuya']]],['유니버스','UNIVERSE',[['네네코 마시로','NenekoMashiro'],['아라하시 타비','ArahashiTabi'],['시라유키 히나','ShirayukiHina_'],['아카네 리제','AkaneLize']]],['클리셰','CLICHÉ',[['아오쿠모 린','AokumoRin'],['텐코 시부키','TenkoShibuki'],['하나코 나나','HanakoNana_'],['유즈하 리코','YuzuhaRiko']]],['어비스','ABYSS',[['시즈키 토아','ShizukiToa_'],['코가네 랑','CoganeRang'],['하나요 히요리','HanayoHiyori'],['토키노 메리','TokinoMery']]]];
+export const memberHandles=members.flatMap(g=>g[2]).map(m=>m[1]);
 const bearer='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 let guest,guestAt=0,guestPending;
 async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('외부 조회 오류 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
@@ -75,12 +76,27 @@ async function timelineSource(db,handle,source){
   return{posts:d.results,source};
  },{failureBackoff:failures=>Math.min(60000,3000*2**Math.min(failures-1,5))});
 }
+export async function ingestNotificationPosts(db,posts){
+ let accepted=0;
+ for(const post of posts){const handle=memberHandles.find(h=>h.toLowerCase()===post?.author?.screen_name?.toLowerCase());if(!handle||!/^\d{2,20}$/.test(post.id||'')||typeof post.text!=='string'||post.text.length>30000)continue;
+ const clean={id:post.id,text:post.text,created_timestamp:Number(post.created_timestamp)||0,author:{screen_name:handle},raw_text:{facets:[]}};
+ const key='notification-posts:'+handle,row=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind(key).first();let prior=[];try{prior=JSON.parse(row?.payload||'{}').posts||[]}catch{}
+ const merged=[...new Map([...prior,clean].map(p=>[p.id,p])).values()].sort((a,b)=>{const x=BigInt(a.id),y=BigInt(b.id);return x>y?-1:x<y?1:0}).slice(0,5);
+ await db.prepare(`INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?1,?2,0) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload RETURNING key`).bind(key,JSON.stringify({posts:merged,checkedAt:new Date().toISOString()})).first();
+ await db.prepare(`UPDATE collector_entries SET next_poll_at=0 WHERE key=?1 RETURNING key`).bind('member:v2:'+handle).first();accepted++;
+ }
+ return accepted;
+}
 async function discoverTimeline(db,handle){
  let prior,errors=[];
+ const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode')='push' ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind().first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
+ const pushed=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('notification-posts:'+handle).first();let notificationPosts=[];try{notificationPosts=JSON.parse(pushed?.payload||'{}').posts||[]}catch{}
+ const cached=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('timeline:fx:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
+ if(watcher.mode==='push'&&Date.now()-Number(watcher.checkedAtMs||0)<60000&&timeline&&Date.now()-Date.parse(timeline.checkedAt)<60000)return{posts:[...notificationPosts,...timeline.posts],source:'x-notifications',fresh:true};
  for(const source of ['fx','carry']){
-  try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
+  try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,posts:[...notificationPosts,...feed.posts],fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
  }
- return{posts:prior?.posts||[],source:prior?.source,fresh:false,warning:errors.join(' · ')};
+ return{posts:[...notificationPosts,...(prior?.posts||[])],source:notificationPosts.length?'x-notifications':prior?.source,fresh:false,warning:errors.join(' · ')};
 }
 export function decideSpaceStatus({prior,found,candidate,previous,feedFresh}){
  if(found&&candidate?.state==='Running')return{...found,state:'Running',status:'live',currentParticipants:candidate.currentParticipants??null,title:candidate.title||found.title,authoritative:true};
