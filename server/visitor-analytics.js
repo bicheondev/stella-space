@@ -20,13 +20,13 @@ export async function visitorAnalytics(db,{now=Date.now(),fetcher=fetch}={}){
  const token=process.env.ANALYTICS_READ_TOKEN?.trim()||(saved?decryptToken(saved.value):null);
  if(!token)return{source:'Vercel Web Analytics',status:'disconnected',message:'Vercel 읽기 토큰을 연결하면 공식 방문 통계를 표시합니다.'};
  let previous;try{const r=await db.prepare(`SELECT value FROM operations_settings WHERE key='analytics_cache'`).bind().first();previous=r?JSON.parse(r.value):null;}catch{}
- if(previous&&now-previous.checkedAt<120000)return previous;
- const today=new Date(now).toISOString().slice(0,10),since=new Date(Date.parse(today)-6*86400000).toISOString().slice(0,10),range={since,until:today,limit:'30'};
+ if(previous?.version===2&&now-previous.checkedAt<120000)return previous;
+ const today=new Date(now).toISOString().slice(0,10),since=new Date(Date.parse(today)-6*86400000).toISOString().slice(0,10),range={since,until:new Date(now).toISOString(),limit:'30'};
  try{
   const [totals,daily,countries,referrers,pages]=await Promise.all([
    queryAnalytics(token,'count',{since:today,until:today},fetcher),
    ...['day','country','referrerHostname','requestPath'].map(by=>queryAnalytics(token,'aggregate',{...range,by},fetcher))]);
-  const value={source:'Vercel Web Analytics',status:'connected',checkedAt:now,timezone:'UTC',since,until:today,totals,daily,countries,referrers,pages};
+  const value={version:2,source:'Vercel Web Analytics',status:'connected',checkedAt:now,timezone:'UTC',since,until:today,totals,daily,countries,referrers,pages};
   await db.prepare(`INSERT INTO operations_settings(key,value) VALUES('analytics_cache',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key`).bind(JSON.stringify(value)).first();return value;
  }catch(e){return {...(previous||{}),source:'Vercel Web Analytics',status:previous?'stale':'error',message:e.message};}
 }
