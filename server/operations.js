@@ -1,3 +1,4 @@
+import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
 const page=readFileSync(new URL('./operations.html',import.meta.url),'utf8');
@@ -14,11 +15,13 @@ export async function operations(req,url,db){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method!=='POST')return json({},405);
   if(req.headers.origin!==url.origin)return json({},403);
-  try{let body=req.body;if(typeof body==='string')body=JSON.parse(body);await saveAnalyticsToken(db,body?.token?.trim());return json({ok:true});}catch(e){return json({error:e.message},400);}
+  if(!['vercel','ga'].includes(url.searchParams.get('provider')||'vercel'))return json({error:'지원하지 않는 통계 제공자입니다.'},400);
+  try{let body=req.body;if(typeof body==='string')body=JSON.parse(body);if(url.searchParams.get('provider')==='ga')await saveGaConfig(db,body?.propertyId,body?.credentials);else await saveAnalyticsToken(db,body?.token?.trim());return json({ok:true});}catch(e){return json({error:e.message},400);}
  }
  if(url.pathname==='/api/admin/analytics'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
-  return json(await visitorAnalytics(db));
+  const provider=url.searchParams.get('provider')||'vercel';if(!['vercel','ga'].includes(provider))return json({error:'지원하지 않는 통계 제공자입니다.'},400);
+  return json(await (provider==='ga'?gaAnalytics(db):visitorAnalytics(db)));
  }
  if(url.pathname==='/api/admin/overview'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
