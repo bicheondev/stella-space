@@ -58,21 +58,61 @@ export async function broadcastHistory(db,postId,after=0){
  const rows=await db.prepare('SELECT seq,payload FROM broadcast_messages WHERE post_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 501').bind(postId,after).all();
  const page=rows.results.slice(0,500);return{messages:page.map(row=>JSON.parse(row.payload)),historyCursor:page.at(-1)?.seq||after,hasMore:rows.results.length>500};
 }
-async function profile(handle,db){
-  const member=members.flatMap(g=>g[2]).find(m=>m[1].toLowerCase()===handle.toLowerCase());
-  if(!member)throw Error('등록되지 않은 멤버입니다.');handle=member[1];
-  const value=await sharedCollect(db,'member:v2:'+handle,5000,async()=>{
-    const d=await fxJson(db,'https://api.fxtwitter.com/2/profile/'+handle+'/statuses?count=5');
-    if(d.code!==200||!Array.isArray(d.results))throw Error('멤버 최근 게시물 조회 제한');
-    const own=d.results.find(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase());
-    const avatar=own?.author?.avatar_url;
-    const found=findSpacePost(d.results,handle);
-    if(!found){const prior=await retainedBroadcast(db,handle);return{...prior,handle,avatar,status:'offline',state:prior?'Ended':undefined};}
-    let m;try{m=await spaceMetadata(found.space,db);}catch{}
-    return rememberBroadcast(db,{handle,avatar,status:m?.state==='Running'?'live':m?.state==='Ended'?'offline':'unknown',state:m?.state||'Unknown',currentParticipants:m?.currentParticipants??null,space:found.space,title:m?.title||member[0]+'의 스페이스',postUrl:'https://x.com/'+handle+'/status/'+found.post.id},Number(found.post.created_timestamp)*1000);
-  });
-  return{handle,status:'unknown',...value};
+async function reserveCarrySlot(db){
+ const now=Date.now(),slot=1112;
+ const row=await db.prepare(`INSERT INTO collector_entries (key,next_poll_at) VALUES ('budget:carry',?1+?2)
+ ON CONFLICT(key) DO UPDATE SET next_poll_at=MAX(collector_entries.next_poll_at,?1)+?2
+ WHERE collector_entries.next_poll_at<=?1+2000 RETURNING next_poll_at`).bind(now,slot).first();
+ if(!row)throw Error('보조 게시물 조회 대기 중');
+ const delay=row.next_poll_at-slot-now;if(delay>0)await new Promise(r=>setTimeout(r,delay));
 }
+async function timelineSource(db,handle,source){
+ return sharedCollect(db,'timeline:'+source+':'+handle,source==='fx'?5000:30000,async()=>{
+  const url=source==='fx'?'https://api.fxtwitter.com/2/profile/':'https://api.carryfeed.com/api/profile/';
+  if(source==='carry')await reserveCarrySlot(db);
+  const d=await(source==='fx'?fxJson(db,url+handle+'/statuses?count=5'):json(url+handle+'/statuses?count=5'));
+  if(d.code!==200||!Array.isArray(d.results))throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
+  return{posts:d.results,source};
+ },{failureBackoff:failures=>Math.min(60000,3000*2**Math.min(failures-1,5))});
+}
+async function discoverTimeline(db,handle){
+ let prior,errors=[];
+ for(const source of ['fx','carry']){
+  try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
+ }
+ return{posts:prior?.posts||[],source:prior?.source,fresh:false,warning:errors.join(' · ')};
+}
+export function decideSpaceStatus({prior,found,candidate,previous,feedFresh}){
+ if(found&&candidate?.state==='Running')return{...found,state:'Running',status:'live',currentParticipants:candidate.currentParticipants??null,title:candidate.title||found.title,authoritative:true};
+ if(prior&&previous?.state==='Running')return{...prior,state:'Running',status:'live',currentParticipants:previous.currentParticipants??null,authoritative:true};
+ if(prior&&previous?.state==='Ended')return{...prior,state:'Ended',status:'offline',currentParticipants:null,authoritative:true};
+ if(found&&candidate?.state==='Ended')return{...found,state:'Ended',status:'offline',currentParticipants:null,authoritative:true};
+ // A missing link or a failed request is never evidence that a known live Space ended.
+ if(prior?.state==='Running')return{...prior,state:'Unknown',status:'unknown',lastKnownState:'Running',currentParticipants:null};
+ if(prior?.state==='Ended')return{...prior,status:feedFresh&&!found?'offline':'unknown',state:'Ended',currentParticipants:null};
+ if(!found&&feedFresh)return{status:'offline'};
+ return{...found,state:found?'Unknown':undefined,status:'unknown'};
+}
+async function profile(handle,db){
+ const member=members.flatMap(g=>g[2]).find(m=>m[1].toLowerCase()===handle.toLowerCase());
+ if(!member)throw Error('등록되지 않은 멤버입니다.');handle=member[1];
+ const value=await sharedCollect(db,'member:v2:'+handle,5000,async()=>{
+  const prior=await retainedBroadcast(db,handle);
+  const check=async id=>{if(!id)return null;try{const m=await spaceMetadata(id,db);return m.stale||!m.state?null:m;}catch{return null;}};
+  const [feed,previous]=await Promise.all([discoverTimeline(db,handle),check(prior?.space)]);
+  const own=feed.posts.find(p=>p.author?.screen_name?.toLowerCase()===handle.toLowerCase());
+  const avatar=own?.author?.avatar_url||prior?.avatar;
+  const link=findSpacePost(feed.posts,handle);
+  const candidate=link?.space===prior?.space?previous:await check(link?.space);
+  const found=link?{handle,avatar,space:link.space,title:candidate?.title||member[0]+'의 스페이스',postUrl:'https://x.com/'+handle+'/status/'+link.post.id}:null;
+  const state=decideSpaceStatus({prior,found,candidate,previous,feedFresh:feed.fresh});
+  const result={...state,handle,avatar,discoverySource:feed.source||null,discoveryWarning:feed.warning||null,stateCheckedAt:state.authoritative?new Date().toISOString():null};
+  if(result.authoritative){const started=link&&result.space===link.space?Number(link.post.created_timestamp)*1000:0;await rememberBroadcast(db,result,started||await retainedStartedAt(db,handle));}
+  return result;
+ },{leaseMs:45000});
+ return{handle,status:'unknown',...value};
+}
+async function retainedStartedAt(db,handle){return(await db.prepare('SELECT started_at FROM broadcast_sessions WHERE handle=?1').bind(handle).first())?.started_at||0;}
 async function resolve(input,db){
   let id=input,tweetId=null;
   if(/^https?:/.test(input)){
@@ -126,7 +166,7 @@ export async function sharedCollect(db,key,ttl,produce,options={}){
     const committed=await db.prepare(`UPDATE collector_entries SET payload=?1,next_poll_at=?2,lease_until=0,lease_token='',last_error=NULL,failure_count=0 WHERE key=?3 AND lease_token=?4 RETURNING *`).bind(JSON.stringify(value),(options.startCadence?acquired.last_started_at:clock())+(typeof ttl==='function'?ttl(value):ttl),key,token).first();
     return output(committed||await read(),!committed);
   }catch(e){
-    const backoff=/429/.test(e.message)?30000:Math.max(typeof ttl==='function'?15000:ttl,3000);
+    const failures=(acquired.failure_count||0)+1;const backoff=/429/.test(e.message)?30000:options.failureBackoff?options.failureBackoff(failures):Math.max(typeof ttl==='function'?15000:ttl,3000);
     const failed=await db.prepare(`UPDATE collector_entries SET next_poll_at=?1,lease_until=0,lease_token='',last_error=?2,failure_count=failure_count+1 WHERE key=?3 AND lease_token=?4 RETURNING *`).bind(clock()+backoff,e.message,key,token).first();
     if(failed?.payload)return output(failed);
     if(!failed){const current=await read();if(current?.payload)return output(current,current.lease_until>clock());}

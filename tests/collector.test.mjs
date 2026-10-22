@@ -121,3 +121,12 @@ test('broadcast history keeps more than 500 replies, survives ending, and separa
  assert.equal((await rememberBroadcast(dbA,{...old,state:'Ended'},1000)).space,'room-two');
  assert.equal((await broadcastHistory(dbA,'111')).messages.length,500);a.close();b.close();
 });
+
+test('profile falls back to CarryFeed and rechecks a known live room independently',async()=>{
+ const{a,b,dbA}=setup(),now=Date.now();
+ await rememberBroadcast(dbA,{handle:'ShirayukiHina_',space:'known-live',state:'Running',status:'live',postUrl:'https://x.com/i/status/111'},1000);
+ a.prepare('INSERT INTO collector_entries (key,payload,next_poll_at) VALUES (?,?,?)').run('space:known-live',JSON.stringify({state:'Running',title:'Live'}),now+60000);
+ const original=globalThis.fetch,urls=[];globalThis.fetch=async url=>{urls.push(String(url));return String(url).includes('api.fxtwitter.com')?new Response('',{status:404}):Response.json({code:200,results:[]});};
+ try{const r=await worker.fetch(new Request('https://test/api/member?handle=ShirayukiHina_'),{DB:dbA});const value=await r.json();assert.equal(value.status,'live');assert.equal(value.space,'known-live');assert.equal(value.discoverySource,'carry');assert.equal(urls.length,2);}
+ finally{globalThis.fetch=original;a.close();b.close();}
+});

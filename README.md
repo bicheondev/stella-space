@@ -33,3 +33,14 @@ FxTwitter 호출은 분당 900회를 목표로 공통 67ms 슬롯을 예약합�
 기존 Sites용 파일은 이전 배포 참고용이며 Vercel 배포에서는 `.openai`, Sites 빌드·저장소 도구를 호출하지 않습니다.
 
 방송 시작부터 수집한 답글은 별도 메시지 테이블에 중복 없이 누적하며 500개 제한으로 삭제하지 않습니다. 응답은 500개씩 커서로 읽어 화면에 순차 표시합니다. 방종 후에는 마지막 방송을 멤버별로 유지하고, 다음 방송 시작이 확인되면 새 방송 기록으로 전환합니다. 새 Space가 예정·미확인인 동안은 이전 방송을 유지합니다. 기존의 과거 500개 캐시는 새 기록으로 옮기지만 이미 삭제된 예전 답글은 복구되지 않습니다.
+
+## Space 상태 판정
+
+게시물 탐색과 기존 Space의 상태 확인을 분리합니다. 기존 Running Space는 최근 5개에서 링크가 사라져도 AudioSpaceById로 개별 확인하며, 명시적인 Ended 응답으로만 수집을 종료합니다. 메타데이터 조회 실패는 unknown이고 방송 기록은 유지합니다. 기존 라이브 Space가 없는 경우 최근 5개에 링크가 없으면 offline으로 보는 규칙은 유지합니다.
+
+타임라인은 FxTwitter 우선, 실패하면 CarryFeed로 전환합니다. CarryFeed의 실제 응답 형식을 검증했으며 30초 캐시와 공유 1112ms 호출 슬롯을 적용합니다. 소스별·멤버별 실패에는 3~60초의 지수 재시도 간격을 공유합니다. X 로그인이나 쿠키를 추가하지 않았습니다.
+
+구현 검토에 참고한 프로젝트(코드 직접 전용 없음):
+- x-notify-dc: https://github.com/DezXBT/x-notify-dc/blob/main/poller.go — 푸시와 폴링 대체 경로. 인증 쿠키 경로는 사용하지 않습니다.
+- Bluebird: https://github.com/EthanC/Bluebird/tree/main/core — 수집 소스 전환·실패 복구와 CarryFeed의 공개 타임라인 형식.
+- Tweetcord: https://github.com/Yuuzi261/Tweetcord/blob/main/src/notification/get_tweets.py — 지속 상태·게시물 시간 기반 진행 관리. 인증 세션 경로는 사용하지 않습니다.
