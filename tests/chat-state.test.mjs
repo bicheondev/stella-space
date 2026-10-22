@@ -86,7 +86,7 @@ test('timestamp layout changes keep following enabled and do not jump readers to
 
 test('paused chat shows the latest preview and resuming hides it and follows the bottom',async()=>{
  const {ctx,elements}=await setup();const box={scrollHeight:1800,clientHeight:500,scrollTop:300,querySelectorAll:()=>[]};elements.set('messages',box);
- vm.runInContext("latestChatPreview='사용자  새 메시지';updateAutoScroll()",ctx);
- assert.equal(elements.get('resumeChat').hidden,false);assert.equal(elements.get('latestChatPreview').textContent,'사용자  새 메시지');assert.equal(box.scrollTop,300);
+ vm.runInContext("latestChatPreview={name:'사용자',text:'새 메시지',color:'#d58cb2'};updateAutoScroll()",ctx);
+ assert.equal(elements.get('resumeChat').hidden,false);assert.equal(elements.get('latestChatName').textContent,'사용자');assert.equal(elements.get('latestChatText').textContent,'새 메시지');assert.equal(box.scrollTop,300);
  vm.runInContext('resumeChatFollowing()',ctx);assert.equal(box.scrollTop,1800);assert.equal(vm.runInContext('auto',ctx),true);assert.equal(elements.get('resumeChat').hidden,true);
 });
