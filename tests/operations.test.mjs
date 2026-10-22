@@ -121,3 +121,11 @@ test('debug chat requires operations authentication and reuses service chat with
  const chat=await operations({method:'GET',headers:{cookie}},url('/api/admin/debug-chat'),db),body=await chat.text();assert(body.includes('채팅방에 오신 것을 환영합니다!'));assert(body.includes('Space 또는 공유 게시물 URL 테스트'));assert(body.includes('event.source!==parent'));assert(!body.includes('googletagmanager'));for(const script of body.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
  }finally{client.close()}
 });
+
+test('debug live error feed escapes upstream text and deduplicates repeated browser failures',()=>{
+ const html=readFileSync(new URL('../server/debug.html',import.meta.url),'utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1],elements=new Map();
+ const ctx=vm.createContext({Date,Map,JSON,String,Array,custom:{handle:'testHost'},snapshot:{errors:[{id:1,key:'timeline:fx:AyatsunoYuni',at:Date.now(),error:'<img src=x onerror=bad()> 404'}]},names:[['유니','AyatsunoYuni']],$:id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id)}});
+ vm.runInContext(script.slice(script.indexOf('const esc='),script.indexOf('function cell(')),ctx);
+ vm.runInContext("renderErrors();recordLocalError('x-notifications','푸시 연결 실패');recordLocalError('x-notifications','푸시 연결 실패')",ctx);
+ assert.match(elements.get('errorLog').innerHTML,/FxTwitter/);assert.match(elements.get('errorLog').innerHTML,/&lt;img/);assert(!elements.get('errorLog').innerHTML.includes('<img'));assert.equal(vm.runInContext('localErrors.length',ctx),1);assert.match(elements.get('errorCount').textContent,/2건/);
+});
