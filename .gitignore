@@ -7,7 +7,7 @@ node_modules/
 *.sqlite-*
 
 .vercel/
-public/
+/public/
 .env*
 !.env.example
 .vercel
