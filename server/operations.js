@@ -1,32 +1,31 @@
+import {readFileSync} from 'node:fs';
+import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
+const page=readFileSync(new URL('./operations.html',import.meta.url),'utf8');
 import {createHmac,timingSafeEqual} from 'node:crypto';
 const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 const hash=v=>createHmac('sha256',process.env.OPERATIONS_SECRET||'disabled').update(v).digest('hex');
-const equal=(a,b)=>a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
+const equal=(a,b)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
 export function authorized(cookie=''){return !!process.env.OPERATIONS_SECRET&&equal(cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('ops='))?.slice(4)||'',hash('admin'));}
-export const trackingScript=`(()=>{try{let id=localStorage.getItem('anonymousVisitor');if(!id){id=crypto.randomUUID();localStorage.setItem('anonymousVisitor',id)}const send=()=>navigator.sendBeacon('/api/visit',new Blob([JSON.stringify({id,path:location.pathname,referrer:document.referrer})],{type:'application/json'}));send();const old=history.replaceState;history.replaceState=function(...args){const before=location.pathname;old.apply(this,args);if(location.pathname!==before)send()}}catch{}})();`;
 export async function operations(req,url,db){
  const secret=process.env.OPERATIONS_SECRET?.trim();
  if(secret&&url.pathname==='/ops-'+secret){return new Response(page,{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
- if(url.pathname==='/api/visit'){
+ if(url.pathname==='/api/visit')return json({error:'Removed'},410);
+ if(url.pathname==='/api/admin/analytics/connect'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method!=='POST')return json({},405);
-  const origin=req.headers.origin;if(origin&&origin!==url.origin)return json({},403);
-  let b=req.body;if(typeof b==='string'){try{b=JSON.parse(b)}catch{return json({},400)}}
-  if(!b||!/^[-a-f0-9]{36}$/i.test(b.id||'')||!/^\/[A-Za-z0-9_]{0,20}$/.test(b.path||''))return json({},400);
-  let ref='직접 방문';try{const u=new URL(b.referrer);if(u.hostname!==url.hostname)ref=u.hostname.slice(0,150);else ref='내부 이동'}catch{}
-  const country=String(req.headers['x-vercel-ip-country']||'미확인').slice(0,10), day=new Date(Date.now()+32400000).toISOString().slice(0,10);
-  await db.prepare(`INSERT INTO visitor_daily(day,visitor,country,referrer,path,views) VALUES(?1,?2,?3,?4,?5,1) ON CONFLICT(day,visitor,country,referrer,path) DO UPDATE SET views=views+1 RETURNING views`).bind(day,hash(b.id),country,ref,b.path).first();
-  return json({ok:true});
+  if(req.headers.origin!==url.origin)return json({},403);
+  try{let body=req.body;if(typeof body==='string')body=JSON.parse(body);await saveAnalyticsToken(db,body?.token?.trim());return json({ok:true});}catch(e){return json({error:e.message},400);}
+ }
+ if(url.pathname==='/api/admin/analytics'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  return json(await visitorAnalytics(db));
  }
  if(url.pathname==='/api/admin/overview'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
-  const day=new Date(Date.now()+32400000).toISOString().slice(0,10), month=new Date(Date.now()+32400000-29*86400000).toISOString().slice(0,10);
-  const queries={totals:[`SELECT COUNT(DISTINCT CASE WHEN day=?1 THEN visitor END) dau,COUNT(DISTINCT visitor) mau,COALESCE(SUM(CASE WHEN day=?1 THEN views ELSE 0 END),0) views FROM visitor_daily WHERE day>=?2`,day,month],daily:[`SELECT day,COUNT(DISTINCT visitor) visitors,SUM(views) views FROM visitor_daily WHERE day>=?1 GROUP BY day ORDER BY day`,month],countries:[`SELECT country,COUNT(DISTINCT visitor) visitors,SUM(views) views FROM visitor_daily WHERE day>=?1 GROUP BY country ORDER BY visitors DESC`,month],referrers:[`SELECT referrer,COUNT(DISTINCT visitor) visitors,SUM(views) views FROM visitor_daily WHERE day>=?1 GROUP BY referrer ORDER BY views DESC LIMIT 30`,month],pages:[`SELECT path,COUNT(DISTINCT visitor) visitors,SUM(views) views FROM visitor_daily WHERE day>=?1 GROUP BY path ORDER BY views DESC`,month],collectors:[`SELECT key,payload,next_poll_at,lease_until,last_started_at,fetch_count,failure_count,last_error FROM collector_entries WHERE key NOT LIKE 'budget:%'`],sessions:[`SELECT s.handle,s.post_id,s.space_id,s.started_at,s.payload,COUNT(m.id) messages FROM broadcast_sessions s LEFT JOIN broadcast_messages m ON m.post_id=s.post_id GROUP BY s.handle`],errors:[`SELECT * FROM collector_errors ORDER BY id DESC LIMIT 100`]};
+  const queries={collectors:[`SELECT key,payload,next_poll_at,lease_until,last_started_at,fetch_count,failure_count,last_error FROM collector_entries WHERE key NOT LIKE 'budget:%'`],sessions:[`SELECT s.handle,s.post_id,s.space_id,s.started_at,s.payload,COUNT(m.id) messages FROM broadcast_sessions s LEFT JOIN broadcast_messages m ON m.post_id=s.post_id GROUP BY s.handle`],errors:[`SELECT * FROM collector_errors ORDER BY id DESC LIMIT 100`]};
   const out={now:Date.now(),timezone:'Asia/Seoul'};
-  await Promise.all(Object.entries(queries).map(async([name,[sql,...args]])=>{out[name]=(await db.prepare(sql).bind(...args).all()).results.map(r=>{if(!r.payload)return r;let p={};try{p=JSON.parse(r.payload)}catch{}const {payload,...rest}=r;return {...rest,status:p.status,state:p.state,checkedAt:p.checkedAt,source:p.discoverySource||p.source,warning:p.discoveryWarning||p.warning,title:p.title,space:p.space,messages:p.messages?.length??r.messages,rooms:p.rooms,collecting:p.collecting,stopped:p.stopped,pollIntervalMs:p.pollIntervalMs};});}));
+  await Promise.all(Object.entries(queries).map(async([name,[sql,...args]])=>{out[name]=(await db.prepare(sql).bind(...args).all()).results.map(r=>{if(!r.payload)return r;let p={};try{p=JSON.parse(r.payload)}catch{}const {payload,...rest}=r;return {...rest,status:p.status,state:p.state,checkedAt:p.checkedAt,source:p.discoverySource||p.source,warning:p.discoveryWarning||p.warning,title:p.title,space:p.space,avatar:p.avatar,handle:p.handle||r.handle,messages:p.messages?.length??r.messages,rooms:p.rooms,collecting:p.collecting,stopped:p.stopped,pollIntervalMs:p.pollIntervalMs};});}));
   return json(out);
  }
  return null;
 }
-const page=`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Space 운영</title><style>body{background:#08090b;color:#e7e9ea;font:14px -apple-system,sans-serif;margin:24px}h1{font-size:24px}h2{font-size:18px;margin-top:32px}.cards{display:flex;gap:16px;flex-wrap:wrap}.card{background:#17191e;padding:20px;border-radius:12px;min-width:150px}.card b{display:block;font-size:32px;margin-top:8px}table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:10px;text-align:left;border-bottom:1px solid #292d34;vertical-align:top;overflow-wrap:anywhere}th{color:#8b98a5}.scroll{overflow:auto}pre{white-space:pre-wrap;max-width:650px}a{color:#64b7ff}.muted{color:#8b98a5}button{background:#202630;color:white;border:0;padding:10px;border-radius:6px}</style><h1>Space 운영</h1><p class="muted">5초마다 갱신 · 방문 통계는 한국 시간 기준 · MAU는 최근 30일 브라우저 중복 제외</p><button id="refresh">지금 갱신</button> <span id="updated"></span><p><a href="https://vercel.com/bicheondevs-projects/stellive-space/analytics" target="_blank" rel="noreferrer">Vercel 방문 분석 열기</a></p><div id="content"></div><script>
-const el=document.getElementById('content'),esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const when=n=>n?new Date(n).toLocaleString('ko-KR'):'—';function table(title,rows){if(!rows.length)return '<h2>'+title+'</h2><p class="muted">기록 없음</p>';const keys=[...new Set(rows.flatMap(Object.keys))];return '<h2>'+title+'</h2><div class="scroll"><table><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr>'+rows.map(r=>'<tr>'+keys.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</table></div>'}async function load(){try{const r=await fetch('/api/admin/overview',{cache:'no-store'});if(!r.ok)throw Error('운영 주소를 다시 열어 주세요 ('+r.status+')');const d=await r.json(),t=d.totals[0];el.innerHTML='<div class="cards">'+[['오늘 방문자',t.dau],['최근 30일 방문자',t.mau],['오늘 조회',t.views]].map(([k,v])=>'<div class="card">'+k+'<b>'+v+'</b></div>').join('')+'</div>'+table('방송별 보관 기록',d.sessions.map(r=>({...r,started_at:when(r.started_at)})))+table('멤버 탐지 · 수집 상태',d.collectors.map(r=>{const phase=r.lease_until>d.now?'조회 진행 중':r.last_error?'실패 · 재시도 대기':r.next_poll_at>d.now?'다음 조회 대기':'조회 가능';return {...r,phase,next_poll_at:when(r.next_poll_at),lease_until:r.lease_until>d.now?when(r.lease_until):'잠금 없음',last_started_at:when(r.last_started_at)}}))+table('최근 수집 실패 (최대 100개)',d.errors.map(r=>({...r,at:when(r.at)})))+table('일별 방문',d.daily)+table('국가별 · 최근 30일',d.countries)+table('유입 경로 · 최근 30일',d.referrers)+table('멤버 페이지 · 최근 30일',d.pages);document.getElementById('updated').textContent=when(d.now)}catch(e){document.getElementById('updated').textContent=e.message}}document.getElementById('refresh').onclick=load;load();setInterval(load,5000);
-</script></html>`;
