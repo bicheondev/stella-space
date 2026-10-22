@@ -135,6 +135,32 @@ test('healthy batched notifications reduce timeline fetches and stale inbox heal
  const{a,b,dbA}=setup(),original=globalThis.fetch;let calls=0;
  try{const now=Date.now();a.prepare("INSERT INTO collector_entries(key,payload) VALUES(?,?)").run('x-notifications:test',JSON.stringify({mode:'polling',checkedAtMs:now,lastScanAt:now}));a.prepare("INSERT INTO collector_entries(key,payload) VALUES(?,?)").run('timeline:fx:GANGZIIII',JSON.stringify({posts:[],checkedAt:new Date(now).toISOString(),source:'fx'}));globalThis.fetch=async()=>{calls++;throw Error('upstream unavailable')};
  const first=await(await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA})).json();assert.equal(first.status,'offline');assert.equal(calls,0);
- a.prepare("UPDATE collector_entries SET next_poll_at=0 WHERE key='member:v2:GANGZIIII'").run();a.prepare("UPDATE collector_entries SET payload=? WHERE key='x-notifications:test'").run(JSON.stringify({mode:'polling',lastScanAt:now-60000}));await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert(calls>0);
+ a.prepare("UPDATE collector_entries SET payload=? WHERE key='timeline:fx:GANGZIIII'").run(JSON.stringify({posts:[],checkedAt:new Date(now-31000).toISOString(),source:'fx'}));a.prepare("UPDATE collector_entries SET next_poll_at=0 WHERE key='member:v2:GANGZIIII'").run();a.prepare("UPDATE collector_entries SET payload=? WHERE key='x-notifications:test'").run(JSON.stringify({mode:'polling',lastScanAt:now-60000}));await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});assert(calls>0);
+ }finally{globalThis.fetch=original;a.close();b.close()}
+});
+
+test('healthy push keeps cached discovery while a new Space notification is processed immediately',async()=>{
+ const{a,b,dbA}=setup(),original=globalThis.fetch,now=Date.now();let calls=0;
+ try{
+ a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('x-notifications:test',JSON.stringify({mode:'push',pushConnected:true,checkedAtMs:now,lastScanAt:now-120000}),0);
+ a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('timeline:fx:GANGZIIII',JSON.stringify({posts:[],checkedAt:new Date(now-120000).toISOString(),source:'fx'}),0);
+ globalThis.fetch=async()=>{calls++;throw Error('unexpected external request')};
+ const first=await(await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA})).json();assert.equal(first.status,'offline');assert.equal(calls,0);
+ const {ingestNotificationPosts}=await import('../worker/index.js');
+ a.prepare('INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?,?,?)').run('space:1abcdefghi',JSON.stringify({state:'Running',title:'New live'}),now+60000);
+ await ingestNotificationPosts(dbA,[{id:'999',text:'https://x.com/i/spaces/1abcdefghi',author:{screen_name:'GANGZIIII'}}]);
+ const pushed=await(await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA})).json();assert.equal(pushed.status,'live');assert.equal(pushed.space,'1abcdefghi');assert.equal(calls,0);
+ }finally{globalThis.fetch=original;a.close();b.close()}
+});
+
+test('CarryFeed 429 pauses the provider across members and normal deferrals never become new errors',async()=>{
+ const{a,b,dbA}=setup(),original=globalThis.fetch;let carryCalls=0;
+ globalThis.fetch=async url=>{if(String(url).includes('api.carryfeed.com')){carryCalls++;return new Response('',{status:429,headers:{'Retry-After':'3600'}})}return new Response('',{status:404});};
+ try{
+ await worker.fetch(new Request('https://test/api/member?handle=GANGZIIII'),{DB:dbA});
+ const until=a.prepare("SELECT next_poll_at FROM collector_entries WHERE key='budget:pause:carry'").get().next_poll_at;assert(until>Date.now()+3500000);
+ await worker.fetch(new Request('https://test/api/member?handle=AyatsunoYuni'),{DB:dbA});assert.equal(carryCalls,1);
+ const deferred=a.prepare("SELECT * FROM collector_entries WHERE key='timeline:carry:AyatsunoYuni'").get();assert.equal(deferred.failure_count,0);assert.equal(deferred.last_error,null);
+ assert.equal(a.prepare("SELECT COUNT(*) n FROM collector_errors WHERE key LIKE 'timeline:carry:%'").get().n,1);
  }finally{globalThis.fetch=original;a.close();b.close()}
 });

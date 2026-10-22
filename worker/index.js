@@ -2,7 +2,7 @@ const members=[['','',[['강지','GANGZIIII']]],['에버리스','EVERYS',[['아�
 export const memberHandles=members.flatMap(g=>g[2]).map(m=>m[1]);
 const bearer='AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 let guest,guestAt=0,guestPending;
-async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('외부 조회 오류 ('+r.status+') · '+new URL(url).pathname);const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
+async function json(url,init={}){const r=await fetch(url,{...init,headers:{'user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',...init.headers},redirect:'manual',signal:AbortSignal.timeout(10000)});if(!r.ok){const e=Error('외부 조회 오류 ('+r.status+') · '+new URL(url).pathname);e.status=r.status;const after=r.headers.get('retry-after'),seconds=Number(after),reset=Number(r.headers.get('x-rate-limit-reset'))*1000;e.retryAt=Math.max(Number.isFinite(seconds)&&after?Date.now()+seconds*1000:Date.parse(after)||0,reset||0);throw e;}const d=await r.json();if(d.errors?.length)throw Error(d.errors[0].message);return d;}
 // 10% headroom below the provider's published 1,000 requests/minute.
 const FX_TARGET_RPM=900,PROFILE_RPM=members.flatMap(g=>g[2]).length*60/5,FX_SLOT_MS=Math.ceil(60000/FX_TARGET_RPM);
 export function replyInterval(roomCount){return Math.ceil(60000*Math.max(1,roomCount)/(FX_TARGET_RPM-PROFILE_RPM));}
@@ -13,7 +13,10 @@ export async function reserveFxSlot(db,now=Date.now()){
   if(!row)throw Error('공유 호출 예산 대기 중');
   return Math.max(0,row.next_poll_at-FX_SLOT_MS-now);
 }
-async function fxJson(db,url){const delay=await reserveFxSlot(db);if(delay)await new Promise(r=>setTimeout(r,delay));return json(url);}
+function deferred(message,retryAt){return Object.assign(Error(message),{deferred:true,retryAt});}
+export async function providerReady(db,source){const row=await db.prepare('SELECT next_poll_at FROM collector_entries WHERE key=?1').bind('budget:pause:'+source).first();if(row?.next_poll_at>Date.now())throw deferred('제공처 재시도 시각 대기 중',row.next_poll_at);}
+async function providerFailure(db,source,error){if(error.status!==429&&!/\(429\)/.test(error.message))return;const until=Math.max(error.retryAt||0,Date.now()+(source==='carry'?300000:30000));error.retryAt=until;await db.prepare(`INSERT INTO collector_entries(key,next_poll_at) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET next_poll_at=MAX(collector_entries.next_poll_at,excluded.next_poll_at) RETURNING key`).bind('budget:pause:'+source,until).first();}
+async function fxJson(db,url){await providerReady(db,'fx');const delay=await reserveFxSlot(db);if(delay)await new Promise(r=>setTimeout(r,delay));await providerReady(db,'fx');try{return await json(url)}catch(e){await providerFailure(db,'fx',e);throw e;}}
 async function replySchedule(db,id){
  const now=Date.now();
  const live=await db.prepare(`SELECT COUNT(*) AS count FROM collector_entries WHERE key LIKE 'member:v2:%' AND payload IS NOT NULL AND json_extract(payload,'$.status')='live' AND last_started_at>=?1`).bind(now-30000).first();
@@ -60,21 +63,21 @@ export async function broadcastHistory(db,postId,after=0){
  const page=rows.results.slice(0,500);return{messages:page.map(row=>JSON.parse(row.payload)),historyCursor:page.at(-1)?.seq||after,hasMore:rows.results.length>500};
 }
 async function reserveCarrySlot(db){
- const now=Date.now(),slot=1112;
+ const now=Date.now(),slot=5000;
  const row=await db.prepare(`INSERT INTO collector_entries (key,next_poll_at) VALUES ('budget:carry',?1+?2)
  ON CONFLICT(key) DO UPDATE SET next_poll_at=MAX(collector_entries.next_poll_at,?1)+?2
  WHERE collector_entries.next_poll_at<=?1+2000 RETURNING next_poll_at`).bind(now,slot).first();
- if(!row)throw Error('보조 게시물 조회 대기 중');
+ if(!row)throw deferred('보조 게시물 조회 대기 중',now+5000);
  const delay=row.next_poll_at-slot-now;if(delay>0)await new Promise(r=>setTimeout(r,delay));
 }
 async function timelineSource(db,handle,source){
- return sharedCollect(db,'timeline:'+source+':'+handle,source==='fx'?5000:30000,async()=>{
+ return sharedCollect(db,'timeline:'+source+':'+handle,source==='fx'?30000:60000,async()=>{
   const url=source==='fx'?'https://api.fxtwitter.com/2/profile/':'https://api.carryfeed.com/api/profile/';
-  if(source==='carry')await reserveCarrySlot(db);
-  const d=await(source==='fx'?fxJson(db,url+handle+'/statuses?count=5'):json(url+handle+'/statuses?count=5'));
+  if(source==='carry'){await providerReady(db,'carry');await reserveCarrySlot(db);await providerReady(db,'carry');}
+  let d;try{d=await(source==='fx'?fxJson(db,url+handle+'/statuses?count=5'):json(url+handle+'/statuses?count=5'));}catch(e){if(source==='carry')await providerFailure(db,'carry',e);throw e;}
   if(d.code!==200||!Array.isArray(d.results))throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
   return{posts:d.results,source};
- },{failureBackoff:failures=>Math.min(60000,3000*2**Math.min(failures-1,5))});
+ },{failureBackoff:failures=>Math.min(300000,30000*2**Math.min(failures-1,4))});
 }
 export async function ingestNotificationPosts(db,posts){
  let accepted=0;
@@ -89,10 +92,13 @@ export async function ingestNotificationPosts(db,posts){
 }
 async function discoverTimeline(db,handle){
  let prior,errors=[];
- const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') AND json_extract(payload,'$.lastScanAt')>?1 ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind(Date.now()-45000).first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
+ const state=await db.prepare("SELECT payload FROM collector_entries WHERE (key='x-notifications' OR key LIKE 'x-notifications:%') AND json_extract(payload,'$.mode') IN ('push','polling') AND (json_extract(payload,'$.lastScanAt')>?1 OR (json_extract(payload,'$.pushConnected')=1 AND json_extract(payload,'$.checkedAtMs')>?2)) ORDER BY json_extract(payload,'$.checkedAtMs') DESC LIMIT 1").bind(Date.now()-45000,Date.now()-30000).first();let watcher={};try{watcher=JSON.parse(state?.payload||'{}')}catch{}
  const pushed=await db.prepare('SELECT payload FROM collector_entries WHERE key=?1').bind('notification-posts:'+handle).first();let notificationPosts=[];try{notificationPosts=JSON.parse(pushed?.payload||'{}').posts||[]}catch{}
  const cached=await db.prepare("SELECT payload FROM collector_entries WHERE key IN (?1,?2) AND payload IS NOT NULL ORDER BY json_extract(payload,'$.checkedAt') DESC LIMIT 1").bind('timeline:fx:'+handle,'timeline:carry:'+handle).first();let timeline;try{timeline=JSON.parse(cached?.payload||'null')}catch{}
- if(['push','polling'].includes(watcher.mode)&&Date.now()-Number(watcher.lastScanAt||0)<45000&&timeline&&Date.now()-Date.parse(timeline.checkedAt)<60000)return{posts:[...notificationPosts,...timeline.posts],source:'x-notifications',fresh:true};
+ const pushHealthy=watcher.mode==='push'&&watcher.pushConnected===true&&Date.now()-Number(watcher.checkedAtMs||0)<30000;
+ const inboxHealthy=['push','polling'].includes(watcher.mode)&&Date.now()-Number(watcher.lastScanAt||0)<45000;
+ const auditMs=pushHealthy?300000+memberHandles.indexOf(handle)*2000:inboxHealthy?60000:30000;
+ if(timeline&&Date.now()-Date.parse(timeline.checkedAt)<auditMs)return{posts:[...notificationPosts,...timeline.posts],source:pushHealthy||inboxHealthy?'x-notifications':timeline.source,fresh:true};
  for(const source of ['fx','carry']){
   try{const feed=await timelineSource(db,handle,source);if(feed.posts){if(!feed.stale)return{...feed,posts:[...notificationPosts,...feed.posts],fresh:true};prior||=feed;}errors.push(feed.warning||'게시물 조회 대기 중');}catch(e){errors.push(e.message);}
  }
@@ -182,7 +188,11 @@ export async function sharedCollect(db,key,ttl,produce,options={}){
     const committed=await db.prepare(`UPDATE collector_entries SET payload=?1,next_poll_at=?2,lease_until=0,lease_token='',last_error=NULL,failure_count=0 WHERE key=?3 AND lease_token=?4 RETURNING *`).bind(JSON.stringify(value),(options.startCadence?acquired.last_started_at:clock())+(typeof ttl==='function'?ttl(value):ttl),key,token).first();
     return output(committed||await read(),!committed);
   }catch(e){
-    const failures=(acquired.failure_count||0)+1;const backoff=/429/.test(e.message)?30000:options.failureBackoff?options.failureBackoff(failures):Math.max(typeof ttl==='function'?15000:ttl,3000);
+    if(e.deferred||/공유 호출 예산 대기 중/.test(e.message)){
+      const waiting=await db.prepare(`UPDATE collector_entries SET next_poll_at=?1,lease_until=0,lease_token='' WHERE key=?2 AND lease_token=?3 RETURNING *`).bind(Math.max(clock()+1000,e.retryAt||clock()+3000),key,token).first();
+      if(waiting?.payload)return{...output(waiting),waiting:true,waitingReason:e.message};throw e;
+    }
+    const failures=(acquired.failure_count||0)+1;const backoff=Math.max((e.retryAt||0)-clock(),options.failureBackoff?options.failureBackoff(failures):/429/.test(e.message)?30000:Math.max(typeof ttl==='function'?15000:ttl,3000));
     const failed=await db.prepare(`UPDATE collector_entries SET next_poll_at=?1,lease_until=0,lease_token='',last_error=?2,failure_count=failure_count+1 WHERE key=?3 AND lease_token=?4 RETURNING *`).bind(clock()+backoff,e.message,key,token).first();
     if(failed)try{await db.prepare(`INSERT INTO collector_errors(at,key,error) VALUES(?1,?2,?3) RETURNING id`).bind(clock(),key,String(e.message).slice(0,1000)).first();await db.prepare(`DELETE FROM collector_errors WHERE id NOT IN (SELECT id FROM collector_errors ORDER BY id DESC LIMIT 500) RETURNING id`).bind().all();}catch{}
     if(failed?.payload)return output(failed);

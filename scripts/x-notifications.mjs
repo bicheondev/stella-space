@@ -21,7 +21,7 @@ export async function syncFollowNotifications(session,{targets=memberHandles,fet
  for(const handle of targets){try{const status=await request('/1.1/friendships/show.json?target_screen_name='+handle);const source=status?.relationship?.source;if(!source)throw Error('팔로우 상태 확인 실패');if(!source.following)await request('/1.1/friendships/create.json',{screen_name:handle});if(!source.notifications_enabled)await request('/1.1/friendships/update.json',{screen_name:handle,device:'true',all_replies:'false'});const verified=source.following&&source.notifications_enabled?source:(await request('/1.1/friendships/show.json?target_screen_name='+handle))?.relationship?.source;if(verified?.following&&verified?.notifications_enabled)enabled.push(handle);}catch(e){retryAt=e.retryAt||now+300000;break;}}
  return{enabled,pending:targets.filter(h=>!enabled.includes(h)),retryAt,checkedAt:now};
 }
-export async function watchXNotifications({origin,secret,signal,fetcher=fetch}){
+export async function watchXNotifications({origin,secret,signal,fetcher=fetch,onOwnership=()=>{}}){
  const runId=randomUUID();const auth={Authorization:'Bearer '+secret};let session,mode='connecting',lastPushAt=null,lastScanAt=null,error=null,scanPending=false,dirty=false,lastPublish=0,nextScanAt=0,followSetup=null,pushConnected=false,pushClient=null,leaseOwned=null;const seen=new Set();
  async function site(path,body){const r=await fetcher(origin+path,{method:body?'POST':'GET',headers:{...auth,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});if(!r.ok)throw Error('알림 연결 서버 응답 ('+r.status+')');return r.json();}
  async function publish(posts=[]){await site('/api/notification-event',{runId,mode,lastPushAt,lastScanAt,error,posts,followSetup,pushConnected});lastPublish=Date.now();}
@@ -31,16 +31,16 @@ export async function watchXNotifications({origin,secret,signal,fetcher=fetch}){
   const safety=(async()=>{while(!signal.aborted){try{if(leaseOwned!==false)await scan();if(Date.now()-lastPublish>15000)await publish()}catch(e){error=/\([345]\d{2}\)/.test(e.message)?e.message:'X 알림함 조회 실패 · 세션 또는 제공처 상태를 확인하세요.';try{await publish()}catch{}}try{await delay(pushConnected?30000:5000,null,{signal})}catch{break}}})();
   while(!signal.aborted){
    try{
-    const lease=await site('/api/notification-push',{owner:runId});leaseOwned=lease.owned;
+    const lease=await site('/api/notification-push',{owner:runId});leaseOwned=lease.owned;onOwnership(leaseOwned);
     if(!leaseOwned){pushClient?.close();pushClient=null;pushConnected=false;mode='polling';}
     else if(!pushClient){
      pushClient=await openWebPush({session,state:lease.state,signal,onNotification:async()=>{lastPushAt=Date.now();error=null;try{await scan()}catch{error='새 알림의 게시물 내용을 확인하지 못했습니다.';}},onDisconnected:message=>{pushConnected=false;mode='polling';error=message;pushClient?.close();pushClient=null;},saveState:async state=>{const saved=await site('/api/notification-push',{owner:runId,state});if(!saved.owned)throw Error('푸시 연결 담당 변경');}});
      pushConnected=true;mode='push';error=null;
     }
     await publish();
-   }catch(e){pushClient?.close();pushClient=null;pushConnected=false;mode='polling';error=/^X .*등록/.test(e.message)?e.message:'푸시 연결 대기 · 알림함 보조 조회 중';try{await publish()}catch{}}
+   }catch(e){onOwnership(false);pushClient?.close();pushClient=null;pushConnected=false;mode='polling';error=/^X .*등록/.test(e.message)?e.message:'푸시 연결 대기 · 알림함 보조 조회 중';try{await publish()}catch{}}
    try{await delay(10000,null,{signal})}catch{break}
   }
   await safety;
- }catch{if(!signal.aborted)console.error('X 봇 연결을 시작하지 못했습니다. 운영 페이지에서 연결 상태를 확인하세요.');}finally{pushClient?.close();if(leaseOwned)try{await fetcher(origin+'/api/notification-push',{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify({owner:runId,action:'release'}),signal:AbortSignal.timeout(5000)});}catch{}session=null;}
+ }catch{if(!signal.aborted)console.error('X 봇 연결을 시작하지 못했습니다. 운영 페이지에서 연결 상태를 확인하세요.');}finally{onOwnership(false);pushClient?.close();if(leaseOwned)try{await fetcher(origin+'/api/notification-push',{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify({owner:runId,action:'release'}),signal:AbortSignal.timeout(5000)});}catch{}session=null;}
 }
