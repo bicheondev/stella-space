@@ -12,6 +12,14 @@ export async function operations(req,url,db){
  const secret=process.env.OPERATIONS_SECRET?.trim();
  if(secret&&url.pathname==='/ops-'+secret){return new Response(page,{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','Set-Cookie':`ops=${hash('admin')}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`}});}
  if(url.pathname==='/api/visit')return json({error:'Removed'},410);
+ if(url.pathname==='/api/admin/errors'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(req.method!=='DELETE')return json({},405);
+  if(req.headers.origin!==url.origin)return json({},403);
+  let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body}catch{return json({error:'삭제 범위를 확인해 주세요.'},400)}
+  const through=body?.through;if(!Number.isSafeInteger(through)||through<1)return json({error:'삭제 범위를 확인해 주세요.'},400);
+  const rows=await db.prepare('DELETE FROM collector_errors WHERE id<=?1 RETURNING id').bind(through).all();return json({ok:true,deleted:rows.results.length,through});
+ }
  if(url.pathname==='/api/admin/x-notifications'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method==='POST'){if(req.headers.origin!==url.origin)return json({},403);try{return json(await saveXSession(db,typeof req.body==='string'?JSON.parse(req.body):req.body))}catch(e){return json({error:e.message},400)}}

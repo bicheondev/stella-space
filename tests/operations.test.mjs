@@ -83,3 +83,18 @@ test('HTTP status takes precedence over misleading legacy error labels',()=>{
  assert.equal(issue('보조 게시물 조회 대기 중')[0],'조회 차례를 기다리고 있어요');
  assert.equal(issue('조회 제한')[0],'조회가 일시적으로 제한됐어요');
 });
+
+test('error history deletion is admin-only, same-origin and bounded so newer errors and active jobs survive',async()=>{
+ process.env.OPERATIONS_SECRET='test-private-secret';const{client,db}=await fixture();
+ try{
+ await client.execute("INSERT INTO collector_errors(at,key,error) VALUES(1,'timeline:fx:test','old'),(2,'timeline:fx:test','old'),(3,'timeline:fx:test','new')");
+ await client.execute("INSERT INTO collector_entries(key,last_error) VALUES('timeline:fx:test','active failure')");
+ const page=await operations({headers:{}},url('/ops-test-private-secret'),null),cookie=page.headers.get('set-cookie').split(';')[0];
+ assert.equal((await operations({method:'DELETE',headers:{},body:{through:2}},url('/api/admin/errors'),db)).status,404);
+ assert.equal((await operations({method:'DELETE',headers:{cookie,origin:'https://evil.example'},body:{through:2}},url('/api/admin/errors'),db)).status,403);
+ assert.equal((await operations({method:'GET',headers:{cookie}},url('/api/admin/errors'),db)).status,405);
+ assert.equal((await operations({method:'DELETE',headers:{cookie,origin:url('/').origin},body:{through:'2'}},url('/api/admin/errors'),db)).status,400);
+ const response=await operations({method:'DELETE',headers:{cookie,origin:url('/').origin},body:{through:2}},url('/api/admin/errors'),db);assert.equal((await response.json()).deleted,2);
+ assert.equal((await client.execute('SELECT * FROM collector_errors')).rows[0].error,'new');assert.equal((await client.execute('SELECT last_error FROM collector_entries')).rows[0].last_error,'active failure');
+ }finally{client.close()}
+});
