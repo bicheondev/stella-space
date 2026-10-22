@@ -9,21 +9,21 @@ export async function registerWebPush(session,state,decryptor,{fetcher=fetch,hea
  const result=await response.json();if(result.errors?.length)throw Error('X가 푸시 기기 등록을 거절했습니다.');
 }
 // Explicit lifecycle: close before retry, so the library cannot reclaim a handed-off connection.
-export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState}){
- const decryptor=await Decryptor.create(state?.decryptor?.jwk,state?.decryptor?.auth);
+export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState,Client=AutopushClient,createDecryptor=(...args)=>Decryptor.create(...args),register=registerWebPush}){
+ const decryptor=await createDecryptor(state?.decryptor?.jwk,state?.decryptor?.auth);
  const channelId=state?.channelId||randomUUID();
  let client;const close=()=>client?.close();
- client=new AutopushClient({uaid:state?.uaid,channelId,vapidKey:X_VAPID,remoteBroadcasts:state?.remoteBroadcasts,
+ client=new Client({uaid:state?.uaid,channelId,vapidKey:X_VAPID,remoteBroadcasts:state?.remoteBroadcasts,
  onNotification:async n=>{try{await decryptor.decrypt(n.headers.crypto_key,n.headers.encryption,Uint8Array.from(Buffer.from(n.data,'base64url')).buffer);await onNotification();}catch{onDisconnected('푸시 알림 해독 실패');}},
  onError:()=>onDisconnected('푸시 연결 오류'),onDisconnected:()=>{close();onDisconnected('푸시 재연결 중');}});
  // Channel ID must survive restarts together with the decryption keys.
  signal.addEventListener('abort',close,{once:true});
- let timer;
+ let timer,abortReject;
  try{
-  const endpoint=await Promise.race([client.connect(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('푸시 연결 시간 초과')),20000);signal.addEventListener('abort',()=>reject(Error('중지')),{once:true});})]);
+  const endpoint=await Promise.race([client.connect(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('푸시 연결 시간 초과')),20000);abortReject=()=>reject(Error('중지'));signal.addEventListener('abort',abortReject,{once:true});})]);
   if(signal.aborted)throw Error('중지');
   const next={uaid:client.getUaid(),channelId,endpoint,remoteBroadcasts:client.getRemoteBroadcasts(),decryptor:{jwk:decryptor.getJwk(),auth:decryptor.getAuthBase64url()}};
-  if(endpoint!==state?.endpoint)await registerWebPush(session,next,decryptor,{signal});
+  if(endpoint!==state?.endpoint)await register(session,next,decryptor,{signal});
   await saveState(next);return{close:()=>{signal.removeEventListener('abort',close);close();}};
- }catch(e){close();signal.removeEventListener('abort',close);throw e;}finally{clearTimeout(timer);}
+ }catch(e){close();signal.removeEventListener('abort',close);throw e;}finally{clearTimeout(timer);if(abortReject)signal.removeEventListener('abort',abortReject);}
 }
