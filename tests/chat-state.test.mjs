@@ -8,7 +8,7 @@ async function setup(){
  new vm.Script(script);
  const elements=new Map(),element=()=>({textContent:'',value:'',className:'',hidden:false,children:[],style:{setProperty(){}},append(...x){this.children.push(...x);},replaceChildren(){this.children=[];},setAttribute(){},querySelector(){return null;}});
  const storage=new Map(),urls=[];const ctx=vm.createContext({URL,Intl,Date,Set,location:{pathname:'/'},Image:class{},localStorage:{setItem:(k,v)=>storage.set(k,v),getItem:k=>storage.get(k)},history:{replaceState(_state,_title,url){urls.push(url);}},clearTimeout(){},setTimeout(){},document:{getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{classList:{contains(){return false;}}}}});
- vm.runInContext(script.slice(0,script.indexOf("try{$('lightMode').checked=")),ctx);
+ vm.runInContext(script.slice(0,script.indexOf("try{$('showImages').checked=")),ctx);
  vm.runInContext("render=()=>{};tick=async()=>{};",ctx);
  const refresh=script.slice(script.indexOf('async function refresh()'),script.lastIndexOf('refresh();setInterval'));
  vm.runInContext(refresh,ctx);
@@ -92,10 +92,10 @@ test('paused chat shows the latest preview and resuming hides it and follows the
 });
 
 test('theme and image preferences persist and preserve the current following state',async()=>{
- const{ctx,elements}=await setup(),classes=new Set();ctx.document.documentElement={dataset:{}};ctx.document.body.classList.toggle=(key,on)=>{if(on)classes.add(key);else classes.delete(key)};
+ const{ctx,elements}=await setup(),classes=new Set();ctx.matchMedia=()=>({matches:true});ctx.document.documentElement={dataset:{}};ctx.document.body.classList.toggle=(key,on)=>{if(on)classes.add(key);else classes.delete(key)};
  const box={querySelectorAll:()=>[],scrollHeight:1500,scrollTop:300};elements.set('messages',box);
- vm.runInContext("$('lightMode').checked=true;$('showImages').checked=false;auto=false;applyChatPreferences()",ctx);
+ vm.runInContext("$('showImages').checked=false;auto=false;applyChatPreferences()",ctx);
  assert.equal(ctx.document.documentElement.dataset.theme,'light');assert(classes.has('hide-chat-images'));assert.equal(box.scrollTop,300);assert.equal(vm.runInContext("localStorage.getItem('chatShowImages')",ctx),'0');
- vm.runInContext("$('lightMode').checked=false;$('showImages').checked=true;auto=true;applyChatPreferences()",ctx);
- assert.equal(ctx.document.documentElement.dataset.theme,'dark');assert(!classes.has('hide-chat-images'));assert.equal(box.scrollTop,1500);assert.equal(vm.runInContext("localStorage.getItem('chatTheme')",ctx),'dark');
+ ctx.matchMedia=()=>({matches:false});vm.runInContext("$('showImages').checked=true;auto=true;applyChatPreferences()",ctx);
+ assert.equal(ctx.document.documentElement.dataset.theme,'dark');assert(!classes.has('hide-chat-images'));assert.equal(box.scrollTop,1500);
 });
