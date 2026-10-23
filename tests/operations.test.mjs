@@ -46,7 +46,7 @@ test('dashboard renders real metric zeros, member state, job failures and safely
  const elements=new Map();const get=id=>{if(!elements.has(id))elements.set(id,{value:id.endsWith('Filter')?'all':'',innerHTML:'',textContent:'',checked:true,hidden:false,className:'',addEventListener(){},focus(){},style:{}});return elements.get(id)};
  const ctx=vm.createContext({document:{getElementById:get,querySelectorAll:()=>[],addEventListener(){},hidden:false},setInterval(){},Date,Number,String,Math,JSON,console});new vm.Script(script).runInContext(ctx);
  vm.runInContext(`data={now:Date.parse('2026-10-22T10:00:00Z'),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'live',checkedAt:'2026-10-22T09:59:59Z',next_poll_at:0,lease_until:0},{key:'replies:fxtwitter:123',last_error:'<script>bad</script>',failure_count:2,next_poll_at:0,lease_until:0}],sessions:[{handle:'HanayoHiyori',post_id:'123',messages:45}],errors:[]};renderOverview();analytics={status:'connected',checkedAt:Date.now(),totals:{visitors:0,pageviews:0},daily:[{timestamp:'2026-10-22T00:00:00Z',visitors:0,pageviews:0}],countries:[],referrers:[],pages:[]};renderAnalytics();`,ctx);
- assert.equal(get('liveMembers').textContent,'1');assert.equal(get('storedMessages').textContent,'45');assert.equal(get('todayVisitors').textContent,'0');assert(get('membersTable').innerHTML.includes('하나요 히요리'));assert(get('jobsTable').innerHTML.includes('이번 확인을 마치지 못했어요'));assert(get('logAttention').innerHTML.includes('다음 동작'));assert(!get('jobsTable').innerHTML.includes('<script>bad'));assert(get('overviewChart').innerHTML.includes('<svg'));
+ assert.equal(get('liveMembers').textContent,'1');assert.equal(get('todayVisitors').textContent,'0');assert(get('membersTable').innerHTML.includes('하나요 히요리'));assert(get('jobsTable').innerHTML.includes('이번 확인을 마치지 못했어요'));assert(get('logAttention').innerHTML.includes('다음 동작'));assert(!get('jobsTable').innerHTML.includes('<script>bad'));assert(get('overviewChart').innerHTML.includes('<svg'));
  for(const [key,error,expected] of [
  ['timeline:fx:HanayoHiyori','외부 조회 오류 (404)','FxTwitter'],
  ['timeline:carry:HanayoHiyori','외부 조회 오류 (429)','CarryFeed'],
@@ -86,8 +86,8 @@ test('live log updates announce only new errors and real chat changes, and prese
  const base={now:Date.now(),collectors:[{key:'member:v2:HanayoHiyori',handle:'HanayoHiyori',status:'live',checkedAt:new Date().toISOString(),last_started_at:Date.now(),lease_until:Date.now()+5000,next_poll_at:Date.now()+6000}],sessions:[{handle:'HanayoHiyori',post_id:'123',space_id:'space',state:'Running',messages:2}],errors:[]};let response=base,fail=false;
  const ctx=vm.createContext({document:{getElementById:get,querySelectorAll:()=>[],addEventListener(){},hidden:false},setInterval(fn,ms){timers.push(ms)},setTimeout(){return 1},clearTimeout(){},Date,Number,String,Math,JSON,fetch:async()=>fail?Response.json({error:'temporary outage'},{status:503}):Response.json(response)});vm.runInContext(script,ctx);
  await vm.runInContext('load()',ctx);assert(get('logNow').innerHTML.includes('pulse-dot'));assert.equal(get('logNotification').hidden,true);
- response={...base,now:base.now+2000,sessions:[{...base.sessions[0],messages:5}],errors:[{id:1,at:base.now+1000,key:'replies:fxtwitter:123',error:'429 <script>bad</script>'}]};await vm.runInContext('load()',ctx);assert.equal(get('logNotification').hidden,false);assert(get('collectionActivity').textContent.includes('3개'));assert(get('errorsTable').innerHTML.includes('조회 요청이 잠시 몰렸어요'));assert(get('errorsTable').innerHTML.includes('&lt;script&gt;bad&lt;/script&gt;'));assert(!get('errorsTable').innerHTML.includes('<script>bad'));
- fail=true;await vm.runInContext('load()',ctx);assert.equal(get('globalError').hidden,false);assert(get('logLiveBadge').innerHTML.includes('연결 지연'));assert.equal(get('storedMessages').textContent,'5');assert(timers.includes(2000));assert(timers.includes(1000));
+ response={...base,now:base.now+2000,sessions:[{...base.sessions[0],messages:5}],errors:[{id:1,at:base.now+1000,key:'replies:fxtwitter:123',error:'429 <script>bad</script>'}]};await vm.runInContext('load()',ctx);assert.equal(get('logNotification').hidden,false);assert(!get('collectionActivity').textContent.includes('새 채팅'));assert(get('errorsTable').innerHTML.includes('조회 요청이 잠시 몰렸어요'));assert(get('errorsTable').innerHTML.includes('&lt;script&gt;bad&lt;/script&gt;'));assert(!get('errorsTable').innerHTML.includes('<script>bad'));
+ fail=true;await vm.runInContext('load()',ctx);assert.equal(get('globalError').hidden,false);assert(get('logLiveBadge').innerHTML.includes('연결 지연'));assert(timers.includes(30000));assert(timers.includes(1000));
 });
 
 test('HTTP status takes precedence over misleading legacy error labels',()=>{
@@ -134,11 +134,11 @@ test('debug live error feed escapes upstream text and deduplicates repeated brow
  vm.runInContext("$('hideFxTimelineErrors').checked=false;renderErrors()",ctx);assert(elements.get('errorLog').innerHTML.includes('timeline:fx:AyatsunoYuni'));
 });
 
-test('overview counts archived replies for test posts without roster broadcast sessions',async()=>{
+test('overview does not aggregate archived messages',async()=>{
  process.env.OPERATIONS_SECRET='test-private-secret';const {client,db}=await fixture();try{
  await client.execute({sql:'INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)',args:['999','reply1',JSON.stringify({id:'reply1'})]});
  const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops'),null),cookie=adminSessionCookie().split(';')[0];
- const data=await(await operations({headers:{cookie}},url('/api/admin/overview'),db)).json();assert.equal(data.sessions.length,0);assert.deepEqual(data.archives,[{post_id:'999',messages:1}]);
+ const data=await(await operations({headers:{cookie}},url('/api/admin/overview'),db)).json();assert.equal(data.sessions.length,0);assert(!('archives' in data));
  }finally{client.close()}
 });
 
