@@ -4,23 +4,22 @@ X Space 공유 게시물의 공개 답글을 채팅처럼 표시하는 스텔라
 
 ## 실행 구조
 
-- Vercel Node 함수: UI, 멤버 탐색, 답글 수집 API
-- Turso/libSQL: 공유 수집 잠금, 호출 예산, 방송별 수집 답글 보관
-- GitHub Actions: 5분마다 최대 360초 동안 `/api/heartbeat`를 반복 요청. 방문자가 없어도 실행하며, 라이브 방은 자동 간격으로 수집하고 오프라인 때는 5초마다 멤버를 확인합니다.
-- 방문 브라우저도 모든 라이브 방을 수집합니다. 게시물별·전체 배치 잠금으로 외부 중복 호출을 합칩니다.
+- Vercel: 정적 채팅 페이지, GitHub 로그인, 운영 콘솔, 피드백, 분석.
+- Cloudflare: 개인 계정의 Worker와 단일 Durable Object가 전체 멤버 탐지·채팅 수집·푸시 수신을 담당합니다.
+- 브라우저: Cloudflare에 직접 연결하여 최신 기록과 WebSocket 업데이트를 받습니다. 방문자 요청은 수집 작업을 실행하지 않습니다.
+- Turso/libSQL: 기존 방송 기록과 메시지, 암호화된 연결 설정을 보관합니다. 새 메시지만 추가하고 실시간 공유 상태는 수집기 메모리에서 제공합니다.
 
-Actions 스케줄에는 지연·실행 공백이 있을 수 있어 완전한 무중단 상시 수집은 아닙니다. 비공개 저장소의 Actions는 실행 시간 쿼터를 소모합니다. Vercel·Turso·GitHub 무료 플랜 할당량을 확인하세요. Sites 및 D1은 새 런타임에서 사용하지 않습니다.
+무료 한도와 장애 복구에는 제한이 있습니다. 계정별 사용량을 확인해야 하며, 무중단이나 답글 무누락을 보장하지 않습니다. 자세한 구성·검증·복구 절차는 [Cloudflare 운영 문서](cloudflare/README.md)를 참고하세요.
 
 ## 배포
 
-1. Vercel에서 Turso **Starter ($0/month)** 데이터베이스를 연결합니다.
-2. Vercel production 환경 변수: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `COLLECTOR_SECRET`, `OPERATIONS_SECRET`.
-3. GitHub Actions 저장소 secret에 동일한 `COLLECTOR_SECRET`을 등록합니다.
-4. `scripts/heartbeat.mjs`, `.github/workflows/collector.yml`의 사이트 주소를 실제 Vercel 주소로 설정합니다.
-5. `npm ci`, `npm test`, `vercel deploy --prod`.
-6. 인증된 heartbeat를 실행하고 `/api/members`, `/api/collect-live`의 checkedAt과 답글 저장을 확인한 뒤 Actions를 시작합니다.
+1. `npm ci`, `npm test`로 검증합니다.
+2. 개인 Cloudflare 계정을 확인하고 `cloudflare/wrangler.jsonc`로 배포합니다. 회사 계정은 사용하지 않습니다.
+3. Vercel Production의 `SPACELIVE_REALTIME_ORIGIN`에 Worker 주소를 설정합니다. 기존 OAuth·DB·암호화 환경변수는 유지합니다.
+4. GitHub에 push한 뒤 Vercel 자동 배포의 성공을 확인합니다. 수동 배포는 자동 배포 실패 때만 사용합니다.
+5. 기존 Actions 수집기를 중단한 뒤 인증된 Cloudflare `/control/start`로 단일 수집기를 시작합니다.
 
-스키마는 DB 첫 사용 시 생성합니다. API는 DB 미연결 시 503을 반환하며 로컬 메모리·임시 파일 저장소로 조용히 대체하지 않습니다. DB 토큰과 수집 secret은 Git에 넣지 않습니다. 로그에도 secret을 출력하지 않습니다.
+기존 Actions 워크플로와 레거시 수집 코드는 명시적 복구용으로만 남깁니다. 정기 스케줄은 제거하며 Cloudflare 전환 상태에서는 heartbeat가 즉시 종료됩니다. Cloudflare는 기존 DB 스키마를 사용하며 실행 중 스키마를 생성하지 않습니다. 비밀키는 Git이나 로그에 넣지 않습니다.
 
 ## 동작
 
@@ -28,17 +27,17 @@ Actions 스케줄에는 지연·실행 공백이 있을 수 있어 완전한 무
 
 FxTwitter 호출은 분당 900회를 목표로 공통 67ms 슬롯을 예약합니다. 15명 프로필 조회의 분당 180회를 제외한 720회가 답글 예산입니다. 답글 간격은 방 수에 비례하며 응답 시간 때문에 실제 속도는 더 느릴 수 있습니다.
 
-상단 +/−는 글자 크기를 조절합니다. 위로 스크롤하면 따라가기를 멈추고 맨 아래에서 재개합니다. 사진은 최대 120×90px 썸네일로 표시합니다. Pretendard JP 및 ss05를 적용합니다.
+상단 +/−는 글자 크기를 조절합니다. 위로 스크롤하면 따라가기를 멈추고 맨 아래에서 재개합니다. 사진은 최대 120×90px 썸네일로 표시합니다. Apple 기기는 시스템 글꼴, 나머지는 Pretendard와 JP 서브셋 및 ss05를 적용합니다.
 
 기존 Sites용 파일은 이전 배포 참고용이며 Vercel 배포에서는 `.openai`, Sites 빌드·저장소 도구를 호출하지 않습니다.
 
-방송 시작부터 수집한 답글은 별도 메시지 테이블에 중복 없이 누적하며 500개 제한으로 삭제하지 않습니다. 응답은 500개씩 커서로 읽어 화면에 순차 표시합니다. 방종 후에는 마지막 방송을 멤버별로 유지하고, 다음 방송 시작이 확인되면 새 방송 기록으로 전환합니다. 새 Space가 예정·미확인인 동안은 이전 방송을 유지합니다. 기존의 과거 500개 캐시는 새 기록으로 옮기지만 이미 삭제된 예전 답글은 복구되지 않습니다.
+방송 시작부터 수집한 답글은 별도 메시지 테이블에 중복 없이 누적하며 500개 제한으로 삭제하지 않습니다. 최근 200개를 먼저 표시하고 이전 기록은 커서로 백그라운드에서 읽습니다. 방종 후에는 마지막 방송을 멤버별로 유지하고, 다음 방송 시작이 확인되면 새 방송 기록으로 전환합니다. 새 Space가 예정·미확인인 동안은 이전 방송을 유지합니다. 기존의 과거 500개 캐시는 새 기록으로 옮기지만 이미 삭제된 예전 답글은 복구되지 않습니다.
 
 ## Space 상태 판정
 
 게시물 탐색과 기존 Space의 상태 확인을 분리합니다. 기존 Running Space는 최근 5개에서 링크가 사라져도 AudioSpaceById로 개별 확인하며, 명시적인 Ended 응답으로만 수집을 종료합니다. 메타데이터 조회 실패는 unknown이고 방송 기록은 유지합니다. 기존 라이브 Space가 없는 경우 최근 5개에 링크가 없으면 offline으로 보는 규칙은 유지합니다.
 
-타임라인은 FxTwitter 우선, 실패하면 CarryFeed로 전환합니다. CarryFeed의 실제 응답 형식을 검증했으며 30초 캐시와 공유 1112ms 호출 슬롯을 적용합니다. 소스별·멤버별 실패에는 3~60초의 지수 재시도 간격을 공유합니다.
+타임라인은 FxTwitter 우선, 실패하면 CarryFeed로 전환합니다. 제공자별 호출 간격과 재시도 시각을 단일 수집기가 관리합니다.
 
 구현 검토에 참고한 프로젝트:
 - x-notify-dc: https://github.com/DezXBT/x-notify-dc/blob/main/poller.go — 알림함 일괄 조회 보조 경로 검토. 이 프로젝트의 notification 토픽은 실제 구독이 거절되어 사용하지 않습니다.
@@ -55,4 +54,4 @@ FxTwitter 호출은 분당 900회를 목표로 공통 67ms 슬롯을 예약합�
 
 - xnotif (MIT): https://github.com/yutakobayashidev/xnotif
 
-수집기 실행 4분 후 공유 연결 담당 한 개만 GitHub의 임시 GITHUB_TOKEN(actions:write)으로 다음 워크플로 실행을 요청합니다. 더 최신의 대기·실행 중 작업이 있으면 재사용하고 중복 생성하지 않습니다. 수집기는 총 6분간 실행하므로 준비 시간을 확보합니다. 5분 cron은 복구용으로 유지합니다. GitHub 실행 대기열이나 서비스 장애까지 무중단을 보장하지는 않습니다.
+Cloudflare의 저장된 활성 상태와 알람으로 수집기를 복구합니다. Actions의 다음 수집기 예약은 레거시 복구 모드에서만 사용합니다.

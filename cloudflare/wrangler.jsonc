@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "spacelive-realtime",
+  "account_id": "4465bbcc09f7b9f879ca63f37780539d",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {"PUBLIC_ORIGIN": "https://spacelive.vercel.app"},
+  "durable_objects": {"bindings": [{"name": "COORDINATOR", "class_name": "SpaceliveCoordinator"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["SpaceliveCoordinator"]}],
+  "observability": {"enabled": true, "head_sampling_rate": 0.1}
+}

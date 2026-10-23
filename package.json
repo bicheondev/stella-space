@@ -11,12 +11,14 @@
   "devDependencies": {
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.152.0"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.10.2",
+    "linkedom": "^0.18.14",
     "x-client-transaction-id": "^0.3.2",
     "xnotif": "^0.2.1"
   }

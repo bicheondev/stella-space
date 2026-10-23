@@ -1,0 +1,12 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "spacelive-free-runtime-probe",
+  "account_id": "4465bbcc09f7b9f879ca63f37780539d",
+  "main": "probe-worker.js",
+  "compatibility_date": "2026-10-23",
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {"bindings": [{"name": "PROBE", "class_name": "FreeTierProbe"}]},
+  "migrations": [{"tag": "probe-v1", "new_sqlite_classes": ["FreeTierProbe"]}],
+  "observability": {"enabled": true, "head_sampling_rate": 1}
+}

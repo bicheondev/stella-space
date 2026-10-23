@@ -11,7 +11,7 @@ export async function registerWebPush(session,state,decryptor,{fetcher=fetch,hea
  const result=await response.json();if(result.errors?.length)throw Error('X가 푸시 기기 등록을 거절했습니다.');
 }
 // Explicit lifecycle: close before retry, so the library cannot reclaim a handed-off connection.
-export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState,Client=LeasedAutopushClient,createDecryptor=(...args)=>Decryptor.create(...args),register=registerWebPush}){
+export async function openWebPush({session,state,signal,onNotification,onDisconnected,saveState,Client=LeasedAutopushClient,createDecryptor=(...args)=>Decryptor.create(...args),register=registerWebPush,fetcher=fetch,headersFor=signedXHeaders,beforeConnect=async()=>{}}){
  const decryptor=await createDecryptor(state?.decryptor?.jwk,state?.decryptor?.auth);
  const channelId=state?.channelId||randomUUID();
  let client;const close=()=>client?.close();
@@ -22,10 +22,12 @@ export async function openWebPush({session,state,signal,onNotification,onDisconn
  signal.addEventListener('abort',close,{once:true});
  let timer,abortReject;
  try{
+  await beforeConnect({signal});
+  if(signal.aborted)throw Error('중지');
   const endpoint=await Promise.race([client.connect(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('푸시 연결 시간 초과')),20000);abortReject=()=>reject(Error('중지'));signal.addEventListener('abort',abortReject,{once:true});})]);
   if(signal.aborted)throw Error('중지');
   const next={uaid:client.getUaid(),channelId,endpoint,remoteBroadcasts:client.getRemoteBroadcasts(),decryptor:{jwk:decryptor.getJwk(),auth:decryptor.getAuthBase64url()}};
-  if(endpoint!==state?.endpoint)await register(session,next,decryptor,{signal});
+  if(endpoint!==state?.endpoint)await register(session,next,decryptor,{signal,fetcher,headersFor});
   await saveState(next);return{close:()=>{signal.removeEventListener('abort',close);close();}};
  }catch(e){close();signal.removeEventListener('abort',close);throw e;}finally{clearTimeout(timer);if(abortReject)signal.removeEventListener('abort',abortReject);}
 }

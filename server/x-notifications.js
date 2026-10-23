@@ -1,4 +1,5 @@
 import {ClientTransaction,fetchXDocument} from 'x-client-transaction-id';
+import {parseHTML} from 'linkedom';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {encryptToken,decryptToken} from './visitor-analytics.js';
 import {memberHandles,ingestNotificationPosts} from '../worker/index.js';
@@ -8,6 +9,38 @@ let transactionPromise,transactionAt=0;
 export async function signedXHeaders(session,method,path){
  if(!transactionPromise||Date.now()-transactionAt>3600000){transactionAt=Date.now();transactionPromise=(async()=>ClientTransaction.create(await fetchXDocument()))().catch(()=>{transactionPromise=null;throw Error('X 웹 요청 서명을 준비하지 못했습니다.');});}
  const transaction=await transactionPromise;return{...xHeaders(session),'x-client-transaction-id':await transaction.generateTransactionId(method,path)};
+}
+// The library does not accept a fetch implementation. Override only its network-facing
+// index lookup so Cloudflare can account for every request without replacing global fetch.
+export function createXHeaderSigner({fetcher=fetch,now=Date.now,signal,Transaction=ClientTransaction,parseDocument=html=>parseHTML(html).document}={}){
+ let pending=null,preparedAt=0;
+ const request=async(url,init={})=>{
+  const response=await fetcher(url,{...init,redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
+  if(!response.ok)throw Error('X 웹 요청 서명을 준비하지 못했습니다.');
+  return response;
+ };
+ class CountedTransaction extends Transaction{
+  async getIndices(document){
+   const url=this.getOnDemandFileUrl(document||this.homePageDocument);
+   const source=await(await request(url)).text();
+   const indices=[...source.matchAll(/\(\w\[(\d{1,2})\],\s*16\)/g)].map(match=>Number(match[1]));
+   if(!indices.length)throw Error('X 웹 요청 서명을 준비하지 못했습니다.');
+   return[indices[0],indices.slice(1)];
+  }
+ }
+ return async(session,method,path)=>{
+  if(!pending||now()-preparedAt>3600000){
+   preparedAt=now();
+   pending=(async()=>{
+    const response=await request('https://x.com/i/jf/',{headers:{accept:'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36','accept-language':'ja','cache-control':'no-cache'}});
+    const transaction=new CountedTransaction(parseDocument(await response.text()));
+    await transaction.initialize();
+    return transaction;
+   })().catch(()=>{pending=null;throw Error('X 웹 요청 서명을 준비하지 못했습니다.');});
+  }
+  const transaction=await pending;
+  return{...xHeaders(session),'x-client-transaction-id':await transaction.generateTransactionId(method,path)};
+ };
 }
 export function validateXSession(body){for(const key of ['auth_token','ct0'])if(typeof body?.[key]!=='string'||! /^[a-zA-Z0-9%_-]{16,1024}$/.test(body[key]))throw Error('X 로그인 세션 형식을 확인해 주세요.');return{auth_token:body.auth_token,ct0:body.ct0};}
 export async function saveXSession(db,body,{fetcher=fetch,headerBuilder=fetcher===fetch?signedXHeaders:async session=>xHeaders(session)}={}){

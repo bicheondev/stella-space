@@ -1,13 +1,11 @@
 name: Space collector
 on:
-  schedule:
-    - cron: '2-59/5 * * * *'
   workflow_dispatch:
 permissions:
   contents: read
   actions: write
-# Runs intentionally overlap so the next runner starts before this one stops.
-# Collection ownership and rate budgets are coordinated in the shared database.
+# Legacy rollback only. Production collection is owned by Cloudflare.
+# Re-enable manually only after stopping Cloudflare and removing the Vercel origin.
 jobs:
   collect:
     runs-on: ubuntu-latest
