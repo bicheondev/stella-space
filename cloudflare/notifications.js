@@ -37,6 +37,7 @@ export function createNotificationReceiver({
   persistHealth = writeHealth, persistFollowSetup = writeFollowSetup,
 } = {}) {
   let stopped = false, session = null, configured = false, owned = false;
+  let lastFailure=null;
   let mode = 'stopped', error = null, pushClient = null, connection = null;
   let epoch = 0, ownedController = null, leaseUntil = 0, leaseTimer;
   let nextLeaseAt = 0, nextConfigAt = 0, nextConnectAt = 0, nextScanAt = 0, nextFollowAt = 0;
@@ -50,7 +51,7 @@ export function createNotificationReceiver({
   const active = token => !stopped && owned && token === epoch && now() < leaseUntil;
   const status = () => ({
     configured, owned: owned && now() < leaseUntil, mode, pushConnected: owned && now() < leaseUntil && !!pushClient,
-    lastPushAt, lastScanAt, postsReceived, error, followSetup,
+    lastPushAt, lastScanAt, postsReceived, error, followSetup, lastFailure,
     source: 'cloudflare', checkedAtMs: Number.isFinite(lastHealthAt) ? lastHealthAt : null,
   });
 
@@ -177,7 +178,8 @@ export function createNotificationReceiver({
         mode = 'push';
         error = null;
         publish(true);
-      } catch {
+      } catch (failure) {
+        lastFailure=String(failure?.message).slice(0,180);
         if (!active(token) || connection !== current) return;
         closePush();
         mode = 'polling';
@@ -239,7 +241,8 @@ export function createNotificationReceiver({
           error = null;
           nextScanAt = now() + (pushClient ? 30000 : 5000);
           publish();
-        } catch {
+        } catch (failure) {
+          lastFailure=String(failure?.message).slice(0,180);
           if (!active(token)) return;
           error = 'X 알림함 조회 실패 · 세션 또는 제공처 상태를 확인하세요.';
           nextScanAt = Math.max(nextScanAt, now() + Math.min(60000, 5000 * 2 ** Math.min(scanFailures++, 4)));

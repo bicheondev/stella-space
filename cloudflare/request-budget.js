@@ -26,7 +26,9 @@ export function createRequestBudget({fetcher=fetch,onExhausted,limit=36,concurre
     const signal=init.signal || input?.signal;
     await acquire(signal);
     try{
-      const response=await fetcher(input,{...init,redirect:init.redirect||'manual'});
+      const rejectRedirect=init.redirect==='error';
+      const response=await fetcher(input,{...init,redirect:rejectRedirect?'manual':init.redirect||'manual'});
+      if(rejectRedirect&&[301,302,303,307,308].includes(response.status)){await response.body?.cancel();throw new TypeError('Upstream redirect rejected');}
       if(!response.body)return response;
       // Release the connection slot after the body has actually drained. Otherwise
       // metadata bursts can exhaust Workers' six simultaneous outgoing connections.

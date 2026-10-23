@@ -25,3 +25,10 @@ test('aborted queued requests and stop cannot leak work into the next alarm',asy
   const stopped=budget.fetch('https://example.com');budget.close();await assert.rejects(stopped,/stopped/);
   assert.equal(budget.stats().queued,0);
 });
+test('redirect error mode is enforced without passing an unsupported mode to Workers',async()=>{
+  let mode,calls=0;
+  const budget=createRequestBudget({fetcher:async(_url,init)=>{mode=init.redirect;calls++;return calls===1?new Response(null,{status:302,headers:{location:'https://other.example/'}}):new Response('ok');}});
+  await assert.rejects(budget.fetch('https://example.com',{redirect:'error'}),/redirect rejected/);
+  assert.equal(mode,'manual');assert.equal(calls,1);assert.equal(budget.stats().active,0);
+  assert.equal(await(await budget.fetch('https://example.com',{redirect:'error'})).text(),'ok');
+});

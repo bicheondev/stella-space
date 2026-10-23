@@ -10,7 +10,7 @@ this configuration; changing plans requires the owner's decision.
 Vercel serves static member pages, OAuth, the operations console and feedback.
 The browser connects directly to the Cloudflare Worker over HTTPS/WebSocket.
 The Worker routes every member and viewer to one SQLite-backed Durable Object,
-`spacelive`. That single object owns collection, the shared recent-message cache,
+`spacelive-v3` (the pinned `COORDINATOR_NAME`). That single object owns collection, the shared recent-message cache,
 X push reception, and fanout. Turso retains the existing session/message archive.
 Public reads never start another provider collection job.
 
@@ -99,3 +99,35 @@ For rollback, stop the Cloudflare coordinator first, remove the Vercel origin,
 rebuild/redeploy the previous collector, then resume its Actions workflow. An
 automatic fallback to legacy collection is intentionally absent: it would risk
 two collectors using independent provider budgets.
+
+## Runtime cutover verification (2026-10-23)
+
+The production coordinator connected to X push, completed authenticated inbox
+scans, and resolved all 15 members without provider errors after cutover.
+The previous `spacelive` and `spacelive-v2` objects were explicitly stopped.
+Do not change `COORDINATOR_NAME` during routine deployments: creating another
+active object duplicates collection and consumes duration allowance.
+
+Workers do not support fetch `redirect: error`. The shared request budget maps
+it to `manual` and rejects 301/302/303/307/308 without following Location,
+preserving the no-redirect policy for authenticated requests. Public provider
+requests identify this app with a descriptive User-Agent.
+
+A separate 20-minute soak probe was interrupted by a DO restart at 13m50s;
+it completed 28/28 upstream requests before restart with no incoming requests.
+This is not a passed 20-minute soak. Production persists the enabled flag and
+schedules its watchdog before work so a replacement instance can recover.
+The probe has been stopped; it does not run alongside production.
+
+Private local administration uses the git-ignored, mode-600 file
+`.env.cloudflare-control` containing `CLOUDFLARE_COLLECTOR_SECRET`:
+
+```sh
+node --env-file=.env.cloudflare-control scripts/cloudflare-control.mjs status
+```
+
+The same command accepts `start`, `stop`, and `retire-previous`. The last action
+only disables the two retired coordinator names. Never print or commit the
+control secret. Deploy CF with `--durable-objects-code-update-mode immediate`,
+then verify the actual coordinator revision/status; upload success alone does
+not prove an existing object is executing the new code.

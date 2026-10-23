@@ -42,7 +42,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
       if (slot > now()) await sleep(slot - now(), abort.signal);
       if (providerPause[provider] > now()) throw defer(providerPause[provider]);
     }
-    const response = await fetcher(url, {...init, headers: {'user-agent': 'Mozilla/5.0', ...init.headers}, redirect: 'manual', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])});
+    const response = await fetcher(url, {...init, headers: {'user-agent': 'Spacelive/1.0 (+https://spacelive.vercel.app)', ...init.headers}, redirect: 'manual', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])});
     let data;
     if (response.ok) data = await response.json();
     if (!response.ok || Number(data?.code) === 429) {
