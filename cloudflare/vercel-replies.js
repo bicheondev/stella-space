@@ -1,19 +1,20 @@
-// Only this single coordinator can spend the monthly relay allocation. Viewer
-// requests never call it. Reserve before I/O; persist before batches of 100 so
-// restarts cannot reset or undershoot the counter.
+// One coordinator owns the rolling 30-day allocation; viewers never spend it.
+// Persist reservations before I/O, so a restart can only overcount, not reset it.
+const DAY=86400000;
 export function createVercelReplies({origin,secret,storage,fetcher=fetch,now=Date.now,onEvent=()=>{},monthlyLimit=250000}){
  if(origin!=='https://spacelive.vercel.app'||!secret)throw Error('Invalid Vercel reply relay configuration');
- let state=null,loading=null,reserving=Promise.resolve();
- const period=()=>new Date(now()).toISOString().slice(0,7);
- const snapshot=()=>({...state,limit:monthlyLimit});
+ let buckets=null,used=0,reserving=Promise.resolve();
+ const day=()=>Math.floor(now()/DAY);
+ const snapshot=()=>({windowDays:30,used,limit:monthlyLimit});
  async function reserve(){
   const task=reserving.catch(()=>{}).then(async()=>{
-   if(!state){loading||=storage.get('vercel-replies-budget');const saved=await loading;state=saved?.period===period()?{...saved,used:saved.reserved}: {period:period(),used:0,reserved:0};}
-   if(state.period!==period())state={period:period(),used:0,reserved:0};
-   if(state.used>=monthlyLimit){const error=Error('Vercel 답글 조회의 월 안전 한도에 도달했습니다. 운영 콘솔에서 확인해 주세요.');error.status=503;error.retryAt=now()+60000;onEvent('relay.budget-exhausted',snapshot());throw error;}
-   if(state.used>=state.reserved){const next=Math.min(monthlyLimit,state.used+100);await storage.put('vercel-replies-budget',{period:state.period,reserved:next});state.reserved=next;}
-   state.used++;
-   if(state.used===Math.floor(monthlyLimit*.8))onEvent('relay.budget-warning',snapshot());
+   if(!buckets){const saved=await storage.get('vercel-replies-budget');buckets=saved?.buckets||[];for(const b of buckets)b.used=b.reserved;}
+   buckets=buckets.filter(b=>b.day>day()-30);used=buckets.reduce((sum,b)=>sum+b.used,0);
+   if(used>=monthlyLimit){const error=Error('Vercel 답글 조회의 30일 안전 한도에 도달했습니다. 운영 콘솔에서 확인해 주세요.');error.status=503;error.retryAt=now()+60000;onEvent('relay.budget-exhausted',snapshot());throw error;}
+   let bucket=buckets.find(b=>b.day===day());if(!bucket){bucket={day:day(),used:0,reserved:0};buckets.push(bucket);}
+   if(bucket.used>=bucket.reserved){const reservedTotal=buckets.reduce((s,b)=>s+b.reserved,0);if(reservedTotal>=monthlyLimit)throw Object.assign(Error('Vercel 답글 조회의 30일 안전 한도 예약분이 소진되었습니다.'),{status:503,retryAt:now()+60000});bucket.reserved+=Math.min(100,monthlyLimit-reservedTotal);await storage.put('vercel-replies-budget',{buckets:buckets.map(({day,reserved})=>({day,reserved}))});}
+   bucket.used++;used++;
+   if(used===Math.floor(monthlyLimit*.8))onEvent('relay.budget-warning',snapshot());
   });reserving=task;return task;
  }
  return {status:snapshot,async fetch(url,init={}){

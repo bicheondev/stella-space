@@ -10,7 +10,7 @@ import {createRequestBudget} from './request-budget.js';
 import {broadcastWebhook} from '../server/broadcast-webhook.js';
 
 const PUBLIC_ROUTES = new Set(['/api/members','/api/member','/api/resolve','/api/replies','/api/chat-history','/api/live','/health']);
-const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history']);
+const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/reply-probe','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history']);
 const WATCHDOG_MS = 30000;
 const json = (value, status = 200) => Response.json(value, {status, headers: {'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const count = value => { const number = Number(value || 0); if (!Number.isSafeInteger(number) || number < 0) throw Error('Invalid cursor'); return number; };
@@ -31,7 +31,7 @@ export default {
     const isControl = CONTROL_ROUTES.has(url.pathname);
     if (!PUBLIC_ROUTES.has(url.pathname) && !isControl) return json({error:'Not found'},404);
     if (isControl && !await authorized(request,env)) return json({error:'Unauthorized'},401);
-    if (isControl && request.method !== ((['/control/status','/control/events'].includes(url.pathname)||url.pathname.startsWith('/control/debug/')) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
+    if (isControl && request.method !== ((['/control/status','/control/events','/control/reply-probe'].includes(url.pathname)||url.pathname.startsWith('/control/debug/')) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
     if (!isControl && origin && origin !== publicOrigin(env)) return json({error:'Origin not allowed'},403);
     if (!isControl && request.method === 'OPTIONS') return new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':publicOrigin(env),'Access-Control-Allow-Methods':'GET','Access-Control-Max-Age':'86400','Vary':'Origin'}});
     if (!isControl && request.method !== 'GET') return json({error:'Method not allowed'},405);
@@ -159,6 +159,11 @@ export class SpaceliveCoordinator extends DurableObject {
       if (url.pathname==='/control/stop') {await this.stop();return json(this.status());}
       if (url.pathname==='/control/events') return json(this.events.read(count(url.searchParams.get('after'))));
       if (url.pathname==='/control/status') return json(this.status(true));
+      if(url.pathname==='/control/reply-probe'){
+        const id=url.searchParams.get('id');if(!/^\d{2,20}$/.test(id||''))return json({error:'Invalid post ID'},400);
+        if(!this.ready||!this.replyRelay)return json({error:'Relay not enabled'},503);
+        return this.replyRelay.fetch('https://api.fxtwitter.com/2/conversation/'+id+'?ranking_mode=recency',{signal:AbortSignal.timeout(15000)});
+      }
       if (url.pathname==='/health') return json({ready:this.ready,collecting:this.enabled});
       await this.initialize();
       // Public traffic only reads; alarms and the private start control own scheduling.
@@ -188,7 +193,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'provider-recovery-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'vercel-replies-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}

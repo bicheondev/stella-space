@@ -183,3 +183,28 @@ An old retained Space returning Ended proves only that session ended. During a
 fresh-feed outage it no longer authoritatively declares the member offline.
 A transition from a previously Running session to explicitly Ended still stops
 chat collection immediately; discovering a new Running session takes priority.
+
+## Vercel reply egress
+
+`REPLIES_ORIGIN=https://spacelive.vercel.app` moves only the external
+FxTwitter conversation request to the authenticated `/api/internal/fx-query`
+route. The coordinator still owns scheduling, deduplication, Turso commits,
+WebSocket delivery and Space end checks. Profiles use public stable `id:`
+identities to remove the intermittent screen-name lookup failure. Profile and
+relayed-reply cooldowns are independent because their execution locations differ.
+There is no location switching or retry on an upstream 429.
+
+The Vercel route opens no database and accepts only fixed provider paths. It
+requires the existing collector credential, installed on Vercel as
+`CLOUDFLARE_COLLECTOR_SECRET`. Do not rotate `OPERATIONS_SECRET`.
+
+The single coordinator conservatively reserves at most 250,000 reply relay
+requests in a rolling 30-day window (also across object restarts). An 80% event
+and exhaustion errors are recorded; the private control status includes
+`replyRelay`. The allocation limits this route only, not all account-wide
+Vercel usage. At exhaustion requests stop with a visible collector error rather
+than silently switching providers or spending beyond the allocation. Reassess
+CPU, memory and shared account usage using actual production metrics.
+`GET /control/reply-probe?id=<post ID>` exercises the same relay without adding
+the external post to the roster or chat archive; it requires the control bearer
+and counts against the same safety allocation.

@@ -20,6 +20,12 @@ test('coordinator reserves monthly relay allocation durably and does not reset i
  const values=new Map(),storage={async get(k){return values.get(k);},async put(k,v){values.set(k,v);}};let calls=0;
  const config={origin:'https://spacelive.vercel.app',secret:'test-secret',storage,monthlyLimit:2,fetcher:async(url,init)=>{assert.equal(new URL(url).hostname,'spacelive.vercel.app');assert.equal(init.headers.authorization,'Bearer test-secret');calls++;return Response.json({code:200});}};
  const relay=createVercelReplies(config);await relay.fetch('https://api.fxtwitter.com/2/conversation/123');assert.equal(calls,1);
- const reboot=createVercelReplies(config);await assert.rejects(reboot.fetch('https://api.fxtwitter.com/2/conversation/123'),/월 안전 한도/);assert.equal(calls,1);
+ const reboot=createVercelReplies(config);await assert.rejects(reboot.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);assert.equal(calls,1);
  await assert.rejects(relay.fetch('https://api.fxtwitter.com/2/profile/foo'),/Invalid reply relay target/);
+});
+test('rolling safety allocation does not reset at a month boundary',async()=>{
+ let clock=Date.parse('2026-10-31T23:59:00Z');const values=new Map(),storage={async get(k){return values.get(k)},async put(k,v){values.set(k,v)}};
+ const relay=createVercelReplies({origin:'https://spacelive.vercel.app',secret:'s',storage,monthlyLimit:2,now:()=>clock,fetcher:async()=>Response.json({})});
+ await relay.fetch('https://api.fxtwitter.com/2/conversation/123');clock+=120000;
+ await assert.rejects(relay.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);clock+=31*86400000;await relay.fetch('https://api.fxtwitter.com/2/conversation/123');
 });

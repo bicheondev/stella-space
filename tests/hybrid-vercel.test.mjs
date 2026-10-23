@@ -69,3 +69,9 @@ test('cutover aborts an already-running notification receiver before stopping th
  const result=await runHeartbeat({environment:{COLLECTOR_SECRET:'test-key'},clock:()=>now,fetcher:async()=>Response.json(++calls===1?{liveCount:1,pollIntervalMs:250}:{migrated:true}),watchNotifications:({signal,onOwnership})=>{started++;onOwnership(true);return new Promise(resolve=>signal.addEventListener('abort',()=>{stopped++;resolve();},{once:true}));},makeScheduler:()=>async()=>{schedules++;return false;},sleep:async ms=>{intervals.push(ms);now+=ms;},logger:{log(){},error(){}}});
  assert.equal(result.migrated,true);assert.equal(started,1);assert.equal(stopped,1);assert.equal(schedules,1);assert.deepEqual(intervals,[250]);
 });
+
+test('private upstream relay exits before opening production database or invoking the collector',async()=>{
+ const forbidden=()=>{throw Error('must not run')};let calls=0;
+ const handler=createHandler({getDatabase:forbidden,handleOperations:forbidden,fetchWorker:forbidden,handleFxRelay:async()=>{calls++;return Response.json({code:200});}});
+ const res=response();await handler({url:'/api/internal/fx-query?id=123',method:'GET',headers:{}},res);assert.equal(res.statusCode,200);assert.equal(calls,1);
+});
