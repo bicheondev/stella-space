@@ -8,7 +8,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {"PUBLIC_ORIGIN": "https://spacelive.vercel.app", "COORDINATOR_NAME": "spacelive-v3"},
-  "durable_objects": {"bindings": [{"name": "COORDINATOR", "class_name": "SpaceliveCoordinator"}]},
-  "migrations": [{"tag": "v1", "new_sqlite_classes": ["SpaceliveCoordinator"]}],
+  "durable_objects": {"bindings": [{"name": "COORDINATOR", "class_name": "SpaceliveCoordinator"}, {"name":"DEBUGGER","class_name":"SpaceliveDebug"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["SpaceliveCoordinator"]},{"tag":"v2-debug","new_sqlite_classes":["SpaceliveDebug"]}],
   "observability": {"enabled": true, "head_sampling_rate": 0.1}
 }

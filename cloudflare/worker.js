@@ -1,3 +1,4 @@
+export {SpaceliveDebug} from './debug-space.js';
 import {createEventLog} from './event-log.js';
 import {DurableObject} from 'cloudflare:workers';
 import {createDatabase} from './database.js';
@@ -8,7 +9,7 @@ import {createRequestBudget} from './request-budget.js';
 import {broadcastWebhook} from '../server/broadcast-webhook.js';
 
 const PUBLIC_ROUTES = new Set(['/api/members','/api/member','/api/resolve','/api/replies','/api/chat-history','/api/live','/health']);
-const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/start','/control/stop','/control/retire-previous']);
+const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history']);
 const WATCHDOG_MS = 30000;
 const json = (value, status = 200) => Response.json(value, {status, headers: {'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const count = value => { const number = Number(value || 0); if (!Number.isSafeInteger(number) || number < 0) throw Error('Invalid cursor'); return number; };
@@ -29,11 +30,12 @@ export default {
     const isControl = CONTROL_ROUTES.has(url.pathname);
     if (!PUBLIC_ROUTES.has(url.pathname) && !isControl) return json({error:'Not found'},404);
     if (isControl && !await authorized(request,env)) return json({error:'Unauthorized'},401);
-    if (isControl && request.method !== (['/control/status','/control/events'].includes(url.pathname) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
+    if (isControl && request.method !== ((['/control/status','/control/events'].includes(url.pathname)||url.pathname.startsWith('/control/debug/')) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
     if (!isControl && origin && origin !== publicOrigin(env)) return json({error:'Origin not allowed'},403);
     if (!isControl && request.method === 'OPTIONS') return new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':publicOrigin(env),'Access-Control-Allow-Methods':'GET','Access-Control-Max-Age':'86400','Vary':'Origin'}});
     if (!isControl && request.method !== 'GET') return json({error:'Method not allowed'},405);
     if (url.pathname === '/api/live' && (origin !== publicOrigin(env) || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket')) return json({error:'WebSocket required'},400);
+    if(url.pathname.startsWith('/control/debug/')){const target=new URL(request.url);target.pathname=target.pathname.replace('/control/debug/','/api/');return env.DEBUGGER.getByName('external-debug').fetch(new Request(target));}
     if (url.pathname === '/control/retire-previous') {
       const results=[];
       for(const name of ['spacelive','spacelive-v2']) {const response=await env.COORDINATOR.getByName(name).fetch(new Request('https://coordinator/control/stop',{method:'POST'}));results.push({name,status:response.status,...await response.json()});}

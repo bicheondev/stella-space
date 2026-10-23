@@ -59,3 +59,11 @@ test('staged deployment reads history without collecting; activation and stop pe
   assert.equal(values.get('enabled'),false);assert.equal(alarms.at(-1),null);
   const before=globalThis.__steps;await object.alarm();assert.equal(globalThis.__steps,before);
 });
+
+test('private external debugging uses a different object and never opens the production coordinator',async()=>{
+ const env=gatewayEnv(),debugCalls=[];env.DEBUGGER={getByName(name){debugCalls.push(name);return{fetch:async request=>Response.json({path:new URL(request.url).pathname,execution:'cloudflare'})}}};
+ const url='https://realtime.example/control/debug/resolve?url=test';
+ assert.equal((await gateway.fetch(new Request(url),env)).status,401);
+ const response=await gateway.fetch(new Request(url,{headers:{Authorization:'Bearer '+env.COLLECTOR_SECRET}}),env);
+ assert.equal(response.status,200);assert.deepEqual(await response.json(),{path:'/api/resolve',execution:'cloudflare'});assert.deepEqual(debugCalls,['external-debug']);assert.deepEqual(env.calls,[]);
+});

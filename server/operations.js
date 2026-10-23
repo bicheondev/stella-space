@@ -17,6 +17,14 @@ export async function operations(req,url,db){
  if(url.pathname==='/ops/debug')return new Response(debugPage,{headers:{...privateHeaders,'Content-Type':'text/html;charset=utf-8'}});
  if(url.pathname.startsWith('/api/admin/debug-space/')){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(url.pathname.startsWith('/api/admin/debug-space/cloudflare/')){
+   if((req.method||'GET')!=='GET')return json({},405);
+   const route=url.pathname.split('/').at(-1);if(!['resolve','replies','chat-history'].includes(route))return json({},404);
+   const secret=process.env.CLOUDFLARE_COLLECTOR_SECRET||process.env.COLLECTOR_SECRET;const origin=process.env.SPACELIVE_REALTIME_ORIGIN;
+   if(!secret||!origin)return json({error:'Cloudflare 테스트 연결 설정이 없습니다.'},503);
+   const target=new URL('/control/debug/'+route,origin);target.search=url.search;const result=await fetch(target,{headers:{Authorization:'Bearer '+secret.trim()},redirect:'error',signal:AbortSignal.timeout(20000)});
+   return new Response(await result.text(),{status:result.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store',...(result.headers.get('retry-after')?{'Retry-After':result.headers.get('retry-after')}:{})}});
+  }
   return debugSpace(new Request(url,{method:req.method||'GET'}));
  }
  if(url.pathname==='/api/admin/debug-chat'){

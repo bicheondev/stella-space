@@ -51,3 +51,13 @@ test('debug snapshots preserve a browser cursor when an ephemeral server archive
  vm.runInContext(debugChatScript.slice(0,debugChatScript.indexOf('const debugButton=')),ctx);await vm.runInContext("debugConnect('test')",ctx);assert.equal(close,1);
  const first=await vm.runInContext("api('/api/replies?id=123456')",ctx);seen.add('111');const next=await vm.runInContext("api('/api/replies?id=123456')",ctx);assert.equal(first.historyCursor,1);assert.equal(next.historyCursor,1);assert.equal(next.hasOlder,false);
 });
+
+test('authenticated Cloudflare debug relay forwards only to the fixed private test path',async()=>{
+ const original=globalThis.fetch,oldOrigin=process.env.SPACELIVE_REALTIME_ORIGIN,oldSecret=process.env.CLOUDFLARE_COLLECTOR_SECRET;
+ process.env.SPACELIVE_REALTIME_ORIGIN='https://realtime.example';process.env.CLOUDFLARE_COLLECTOR_SECRET='test-only-secret';let calls=0;
+ globalThis.fetch=async(url,init)=>{calls++;assert.equal(url.origin,'https://realtime.example');assert.equal(url.pathname,'/control/debug/resolve');assert.equal(init.headers.Authorization,'Bearer test-only-secret');return Response.json({execution:'cloudflare',id:'1ExternalSpace'});};
+ try{const url=new URL(base+'/api/admin/debug-space/cloudflare/resolve?url=https://x.com/i/spaces/1ExternalSpace');
+ assert.equal((await operations({method:'GET',headers:{}},url,null)).status,404);assert.equal(calls,0);
+ const result=await operations({method:'GET',headers:{cookie:adminSessionCookie().split(';')[0]}},url,null);assert.equal((await result.json()).execution,'cloudflare');assert.equal(calls,1);
+ }finally{globalThis.fetch=original;if(oldOrigin===undefined)delete process.env.SPACELIVE_REALTIME_ORIGIN;else process.env.SPACELIVE_REALTIME_ORIGIN=oldOrigin;if(oldSecret===undefined)delete process.env.CLOUDFLARE_COLLECTOR_SECRET;else process.env.CLOUDFLARE_COLLECTOR_SECRET=oldSecret;}
+});
