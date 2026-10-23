@@ -14,3 +14,9 @@ test('Turso reset countdown is absent until a real period end is supplied',()=>{
 test('snapshots reject forged periods, future times, invalid values and non-service targets',()=>{
  for(const providers of [{other:{}},{vercel:{period:'daily',checkedAt:new Date(now).toISOString(),metrics:{cpuSeconds:1}}},{cloudflare:{period:'daily',checkedAt:new Date(now+3600000).toISOString(),metrics:{rowsRead:1}}},{turso:{period:'monthly',checkedAt:new Date(now).toISOString(),metrics:{rowsRead:-1}}}])assert.throws(()=>validateUsage({providers},now));
 });
+test('saved usage merges providers, caches reads, and does not expose arbitrary source text',async()=>{
+ const {readUsage,saveUsage}=await import('../server/usage.js');let stored=null,reads=0;const db={prepare(sql){return{bind(value){return{async first(){if(sql.startsWith('SELECT')){reads++;return stored?{value:stored}:null;}stored=value;return{key:'usage_snapshot'};}}}}};
+ await readUsage(db,{now});await readUsage(db,{now:now+1000});assert.equal(reads,1);
+ const result=await saveUsage(db,{providers:{vercel:{period:'rolling30',checkedAt:new Date(now).toISOString(),source:'<script>bad</script>',metrics:{cpuSeconds:12000}}}},{now});assert.equal(result.providers[0].metrics[0].used,12000);assert(!stored.includes('<script>'));assert.equal(result.providers[0].resetsAt,null);
+ await saveUsage(db,{providers:{cloudflare:{period:'daily',checkedAt:new Date(now).toISOString(),metrics:{durationGBs:100}}}},{now});const both=await readUsage(db,{now});assert.equal(both.providers[0].metrics[0].used,12000);assert.equal(both.providers[1].metrics[2].used,100);
+});
