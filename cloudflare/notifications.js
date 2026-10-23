@@ -29,7 +29,7 @@ async function writeFollowSetup(db, value) {
  * The Turso lease fences overlapping deployments and the previous Actions receiver.
  */
 export function createNotificationReceiver({
-  db, signal, onPosts = async () => {}, onHealth = async () => {},
+  db, signal, onEvent=()=>{}, onPosts = async () => {}, onHealth = async () => {},
   waitUntil = () => {}, fetcher = fetch, now = Date.now,
   owner = randomUUID(), loadConfig = notificationConfig, control = webPushControl,
   openPush = openWebPush, headersFor = signedXHeaders, syncFollows = syncFollowNotifications,
@@ -148,13 +148,13 @@ export function createNotificationReceiver({
           session: selectedSession, state, signal: connectionSignal, fetcher, headersFor: buildHeaders, beforeConnect,
           onNotification: async () => {
             if (!active(token) || connection !== current) return;
-            lastPushAt = now();
+            lastPushAt = now();onEvent('push.received');
             error = null;
             await requestScan(true);
           },
           onDisconnected: () => {
             if (!active(token) || connection !== current) return;
-            closePush();
+            onEvent('push.disconnected');closePush();
             mode = 'polling';
             error = '푸시 재연결 대기 · 알림함 보조 조회 중';
             nextConnectAt = now() + Math.min(60000, 1000 * 2 ** Math.min(connectFailures++, 6));
@@ -173,13 +173,13 @@ export function createNotificationReceiver({
           client.close();
           return;
         }
-        pushClient = client;
+        pushClient = client;onEvent('push.connected');
         connectFailures = 0;
         mode = 'push';
         error = null;
         publish(true);
       } catch (failure) {
-        lastFailure=String(failure?.message).slice(0,180);
+        lastFailure=String(failure?.message).slice(0,180);onEvent('notification.failure',{code:failure?.status||failure?.code||'request_failed'});
         if (!active(token) || connection !== current) return;
         closePush();
         mode = 'polling';
@@ -202,7 +202,7 @@ export function createNotificationReceiver({
     const token = epoch, selectedSession = session;
     const scanSignal = AbortSignal.any([lifetime.signal, ownedController.signal]);
     const task = (async () => {
-      let passes = 0;
+      let passes = 0;const scanStarted=now();
       do {
         dirty = false;
         if (!active(token)) return;
@@ -235,14 +235,14 @@ export function createNotificationReceiver({
             for (const id of keep) seen.add(id);
           }
           postsReceived += posts.length;
-          lastScanAt = now();
+          lastScanAt = now();onEvent('inbox.scanned',{fromPush,count:posts.length,durationMs:now()-scanStarted});
           scanFailures = 0;
           scanRetryAt = 0;
           error = null;
           nextScanAt = now() + (pushClient ? 30000 : 5000);
           publish();
         } catch (failure) {
-          lastFailure=String(failure?.message).slice(0,180);
+          lastFailure=String(failure?.message).slice(0,180);onEvent('notification.failure',{code:failure?.status||failure?.code||'request_failed'});
           if (!active(token)) return;
           error = 'X 알림함 조회 실패 · 세션 또는 제공처 상태를 확인하세요.';
           nextScanAt = Math.max(nextScanAt, now() + Math.min(60000, 5000 * 2 ** Math.min(scanFailures++, 4)));

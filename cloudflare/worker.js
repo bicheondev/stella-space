@@ -1,3 +1,4 @@
+import {createEventLog} from './event-log.js';
 import {DurableObject} from 'cloudflare:workers';
 import {createDatabase} from './database.js';
 import {createCollector} from './collector.js';
@@ -7,7 +8,7 @@ import {createRequestBudget} from './request-budget.js';
 import {broadcastWebhook} from '../server/broadcast-webhook.js';
 
 const PUBLIC_ROUTES = new Set(['/api/members','/api/member','/api/resolve','/api/replies','/api/chat-history','/api/live','/health']);
-const CONTROL_ROUTES = new Set(['/control/status','/control/start','/control/stop','/control/retire-previous']);
+const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/start','/control/stop','/control/retire-previous']);
 const WATCHDOG_MS = 30000;
 const json = (value, status = 200) => Response.json(value, {status, headers: {'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const count = value => { const number = Number(value || 0); if (!Number.isSafeInteger(number) || number < 0) throw Error('Invalid cursor'); return number; };
@@ -28,7 +29,7 @@ export default {
     const isControl = CONTROL_ROUTES.has(url.pathname);
     if (!PUBLIC_ROUTES.has(url.pathname) && !isControl) return json({error:'Not found'},404);
     if (isControl && !await authorized(request,env)) return json({error:'Unauthorized'},401);
-    if (isControl && request.method !== (url.pathname === '/control/status' ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
+    if (isControl && request.method !== (['/control/status','/control/events'].includes(url.pathname) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
     if (!isControl && origin && origin !== publicOrigin(env)) return json({error:'Origin not allowed'},403);
     if (!isControl && request.method === 'OPTIONS') return new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':publicOrigin(env),'Access-Control-Allow-Methods':'GET','Access-Control-Max-Age':'86400','Vary':'Origin'}});
     if (!isControl && request.method !== 'GET') return json({error:'Method not allowed'},405);
@@ -54,6 +55,7 @@ export class SpaceliveCoordinator extends DurableObject {
     this.timer=null; this.receiverDue=0; this.receiverPending=null; this.retryWebhookAt=0; this.webhookPending=null;
     this.nextAlarmAt=0;this.alarmWrite=null;
     this.lifetime=null; this.collector=null; this.receiver=null; this.db=null; this.lastError=null;
+    this.events=createEventLog(ctx.storage);this.events.record('coordinator.boot');
     this.errors=new Map(); this.startedAt=Date.now(); this.metrics={http:0,connections:0,alarms:0,upstream:0,upstreamErrors:0,newMessages:0};
     this.hub=createHub({sockets:()=>this.ctx.getWebSockets(),readRoom:(id,options)=>this.collector.room(id,options),waitUntil:task=>this.ctx.waitUntil(task)});
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'));
@@ -69,12 +71,13 @@ export class SpaceliveCoordinator extends DurableObject {
       this.collector=createCollector({db:this.db,fetcher,
         onMembers:members=>this.hub.broadcastMembers(members),
         onMessages:data=>{this.metrics.newMessages+=data.messages.length;this.hub.publishRoom(data.postId);},
+        onEvent:(kind,data)=>this.events.record(kind,data),
         onError:error=>this.recordError(error),
         onBroadcast:({previous,current,name})=>broadcastWebhook(this.db,previous,current,name,{fetcher}),
         notificationHealth:()=>this.receiver?.status() || {},
       });
       await this.collector.initialize();
-      this.receiver=createNotificationReceiver({db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
+      this.receiver=createNotificationReceiver({onEvent:(kind,data)=>this.events.record(kind,data),db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
       this.ready=true;
     })().catch(error=>{this.boot=null;this.lastError='Initialization failed';throw error;});
     return this.boot;
@@ -97,7 +100,7 @@ export class SpaceliveCoordinator extends DurableObject {
     this.lastError=String(error).slice(0,500);
     // Keep repeated provider failures from becoming a write loop.
     if ((this.errors.get(key)||0)>Date.now()-60000) return;
-    this.errors.set(key,Date.now());
+    this.errors.set(key,Date.now());this.events.record('collector.error',{key});
     await this.db.prepare('INSERT INTO collector_errors(at,key,error) VALUES(?1,?2,?3)').bind(at || Date.now(),key,this.lastError).first();
   }
   kick() {
@@ -117,12 +120,13 @@ export class SpaceliveCoordinator extends DurableObject {
   }
   async start() {
     await this.initialize();
-    this.enabled=true;
+    this.enabled=true;this.events.record('coordinator.start');
     await this.ctx.storage.put('enabled',true);
     await this.scheduleAlarm(WATCHDOG_MS);
     this.kick();
   }
   async stop() {
+    this.events.record('coordinator.stop');this.events.flush();
     this.enabled=false; clearTimeout(this.timer);this.timer=null;
     await this.ctx.storage.put('enabled',false);
     if(this.alarmWrite)await this.alarmWrite;
@@ -135,7 +139,7 @@ export class SpaceliveCoordinator extends DurableObject {
     for (const socket of this.ctx.getWebSockets()) try{socket.close(1012,'Collector paused');}catch{}
   }
   async alarm() {
-    this.metrics.alarms++;
+    this.metrics.alarms++;this.events.flush();
     const previousBudget=this.budget?.stats();
     this.nextAlarmAt=0;
     if(this.enabled)await this.scheduleAlarm(previousBudget?.used>=24 || previousBudget?.queued?2000:WATCHDOG_MS);
@@ -149,6 +153,7 @@ export class SpaceliveCoordinator extends DurableObject {
     try {
       if (url.pathname==='/control/start') {await this.start();return json(this.status());}
       if (url.pathname==='/control/stop') {await this.stop();return json(this.status());}
+      if (url.pathname==='/control/events') return json(this.events.read(count(url.searchParams.get('after'))));
       if (url.pathname==='/control/status') return json(this.status(true));
       if (url.pathname==='/health') return json({ready:this.ready,collecting:this.enabled});
       await this.initialize();
@@ -179,7 +184,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'runtime-compat-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'diagnostic-events-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}

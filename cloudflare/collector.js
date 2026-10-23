@@ -17,7 +17,7 @@ function pause(ms, signal) {
 
 // One instance belongs to one Durable Object. Reads never start collection.
 export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pause, handles = memberHandles,
-  onMembers = () => {}, onMessages = () => {}, onError = () => {}, onBroadcast = () => {}, notificationHealth = () => ({})} = {}) {
+  onEvent = () => {}, onMembers = () => {}, onMessages = () => {}, onError = () => {}, onBroadcast = () => {}, notificationHealth = () => ({})} = {}) {
   if (!db?.prepare) throw Error('공유 수집 저장소가 연결되지 않았습니다.');
   const members = new Map(handles.map(handle => [handle, {state: {handle, status: 'unknown'}, retained: null, posts: [], sources: {}, due: 0, pending: null, dirty: false, fetchCount: 0}]));
   const rooms = new Map(), metadataCache = new Map(), pending = new Set(), providerPause = {fx: 0, carry: 0}, providerSlots = {fx: 0, carry: 0};
@@ -84,6 +84,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
         const data = await request(url.href, {headers: await guestHeaders()});
         const space = data.data?.audioSpace;
         if (!space?.metadata) throw Error('Space 정보를 확인할 수 없습니다.');
+        if(entry.value?.state!==space.metadata.state)onEvent('space.observed',{space:id,state:space.metadata.state,previousState:entry.value?.state,startedAt:Number(space.metadata.started_at)||0,endedAt:Number(space.metadata.ended_at)||0,source:'x-metadata'});
         entry.value = {...space.metadata, currentParticipants: currentParticipants(space)};
         entry.error = null; entry.due = now() + (entry.value.state === 'Ended' ? 60000 : PROFILE_INTERVAL);
         return entry.value;
@@ -110,7 +111,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
         const base = source === 'fx' ? 'https://api.fxtwitter.com/2/profile/' : 'https://api.carryfeed.com/api/profile/';
         const data = await request(base + handle + '/statuses?count=5', {}, source);
         if (data.code !== 200 || !Array.isArray(data.results)) throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
-        entry.posts = data.results; entry.at = now(); entry.failures = 0; entry.error = null; entry.next = now() + audit;
+        onEvent('timeline.fetched',{handle,source,count:data.results.length});entry.posts = data.results; entry.at = now(); entry.failures = 0; entry.error = null; entry.next = now() + audit;
         return {posts: combinePosts(member.posts, entry.posts), source: member.posts.length ? 'x-notifications' : source, fresh: true};
       } catch (error) {
         if (!error.deferred) entry.failures++;
@@ -190,6 +191,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
     }
     const changed = meaningful(member.state) !== meaningful(next);
     member.state = next;
+    if(changed&& (next.status!==member.previousLoggedStatus||next.space!==member.previousLoggedSpace)){onEvent('member.detected',{handle,space:next.space,status:next.status,state:next.state,previousStatus:member.previousLoggedStatus,source:next.discoverySource,startedAt:next.startedAt});member.previousLoggedStatus=next.status;member.previousLoggedSpace=next.space;}
     if (changed) await emit(onMembers, snapshot());
   }
   async function checkMember(handle, member) {
@@ -324,7 +326,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
         const prior = changes.get(handle) || members.get(handle).posts;
         if (prior.some(value => value.id === post.id)) continue;
         const clean = {id: post.id, text: post.text, created_timestamp: Number(post.created_timestamp) || 0, author: {screen_name: handle}, raw_text: {facets: []}};
-        changes.set(handle,combinePosts([clean],prior)); accepted++;
+        onEvent('post.received',{handle,postId:post.id,postedAt:clean.created_timestamp*1000,source:'x-notifications'});changes.set(handle,combinePosts([clean],prior)); accepted++;
       }
       for (const [handle,posts] of changes) {
         await db.prepare(`INSERT INTO collector_entries(key,payload,next_poll_at) VALUES(?1,?2,0) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload RETURNING key`).bind('notification-posts:' + handle, JSON.stringify({posts,checkedAt:iso()})).first();

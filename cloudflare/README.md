@@ -131,3 +131,21 @@ only disables the two retired coordinator names. Never print or commit the
 control secret. Deploy CF with `--durable-objects-code-update-mode immediate`,
 then verify the actual coordinator revision/status; upload success alone does
 not prove an existing object is executing the new code.
+
+## Detection audit trail
+
+`GET /control/events?after=<id>` requires the same private control bearer and
+returns up to 500 events in ascending ID order. Continue from the last ID.
+`node --env-file=.env.cloudflare-control scripts/cloudflare-control.mjs events`
+reads the first page. Events are stored in the coordinator's SQLite storage for
+30 days (expired records pruned daily). Push receive/connect/disconnect, post
+receipt with original publication time, metadata state changes, and member
+status changes persist immediately; routine inbox scans and timeline fetches
+batch until the next watchdog alarm. Each event contains server UTC epoch-ms;
+use Asia/Seoul for display. The inbox scan records push-triggered vs fallback,
+count and elapsed request time. Raw notification data, cookies, tokens, headers
+and chat bodies are excluded by a field allowlist. The logger is best effort
+on storage failure and never blocks collection by throwing. This trail begins
+with this deployment; it cannot reconstruct earlier missing receive times.
+SQLite writes/storage consume the existing Free allocation; routine checks are
+not logged per viewer or every five-second member check.
