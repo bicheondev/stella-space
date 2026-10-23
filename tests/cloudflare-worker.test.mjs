@@ -65,5 +65,5 @@ test('private external debugging uses a different object and never opens the pro
  const url='https://realtime.example/control/debug/resolve?url=test';
  assert.equal((await gateway.fetch(new Request(url),env)).status,401);
  const response=await gateway.fetch(new Request(url,{headers:{Authorization:'Bearer '+env.COLLECTOR_SECRET}}),env);
- assert.equal(response.status,200);assert.deepEqual(await response.json(),{path:'/api/resolve',execution:'cloudflare'});assert.deepEqual(debugCalls,['external-debug']);assert.deepEqual(env.calls,[]);
+ assert.equal(response.status,200);assert.deepEqual(await response.json(),{path:'/api/resolve',execution:'cloudflare'});assert.deepEqual(debugCalls,['external-debug-v2']);assert.deepEqual(env.calls,[]);
 });

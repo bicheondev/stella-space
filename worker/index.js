@@ -59,7 +59,8 @@ export async function rememberBroadcast(db,value,startedAt){
 }
 async function retainedBroadcast(db,handle){const row=await db.prepare('SELECT payload FROM broadcast_sessions WHERE handle=?1').bind(handle).first();return row?JSON.parse(row.payload):null;}
 export async function archiveMessages(db,postId,messages){
- for(let i=0;i<messages.length;i+=40){const part=messages.slice(i,i+40),args=[];const placeholders=part.map((m,j)=>{args.push(postId,m.id,JSON.stringify(m));return '('+[1,2,3].map(n=>'?'+(j*3+n)).join(',')+')';});if(part.length)await db.prepare('INSERT INTO broadcast_messages (post_id,id,payload) VALUES '+placeholders.join(',')+' ON CONFLICT(post_id,id) DO NOTHING').bind(...args).first();}
+ const batchSize=Math.min(40,db.maxBatchRows||40);
+ for(let i=0;i<messages.length;i+=batchSize){const part=messages.slice(i,i+batchSize),args=[];const placeholders=part.map((m,j)=>{args.push(postId,m.id,JSON.stringify(m));return '('+[1,2,3].map(n=>'?'+(j*3+n)).join(',')+')';});if(part.length)await db.prepare('INSERT INTO broadcast_messages (post_id,id,payload) VALUES '+placeholders.join(',')+' ON CONFLICT(post_id,id) DO NOTHING').bind(...args).first();}
 }
 export async function broadcastHistory(db,postId,after=0){
  const rows=await db.prepare('SELECT seq,payload FROM broadcast_messages WHERE post_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 501').bind(postId,after).all();

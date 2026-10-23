@@ -35,7 +35,7 @@ export default {
     if (!isControl && request.method === 'OPTIONS') return new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':publicOrigin(env),'Access-Control-Allow-Methods':'GET','Access-Control-Max-Age':'86400','Vary':'Origin'}});
     if (!isControl && request.method !== 'GET') return json({error:'Method not allowed'},405);
     if (url.pathname === '/api/live' && (origin !== publicOrigin(env) || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket')) return json({error:'WebSocket required'},400);
-    if(url.pathname.startsWith('/control/debug/')){const target=new URL(request.url);target.pathname=target.pathname.replace('/control/debug/','/api/');return env.DEBUGGER.getByName('external-debug').fetch(new Request(target));}
+    if(url.pathname.startsWith('/control/debug/')){const target=new URL(request.url);target.pathname=target.pathname.replace('/control/debug/','/api/');return env.DEBUGGER.getByName('external-debug-v2').fetch(new Request(target));}
     if (url.pathname === '/control/retire-previous') {
       const results=[];
       for(const name of ['spacelive','spacelive-v2']) {const response=await env.COORDINATOR.getByName(name).fetch(new Request('https://coordinator/control/stop',{method:'POST'}));results.push({name,status:response.status,...await response.json()});}

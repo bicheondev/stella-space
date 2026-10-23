@@ -3,7 +3,7 @@ import worker from '../worker/index.js';
 
 // Separate object, schema and lifetime: no production collector, push receiver or Turso access.
 export class SpaceliveDebug extends DurableObject{
- constructor(ctx,env){super(ctx,env);this.ctx=ctx;this.db={prepare:sql=>({bind:(...args)=>({first:async()=>[...ctx.storage.sql.exec(sql,...args)][0]||null,all:async()=>({results:[...ctx.storage.sql.exec(sql,...args)]})})})};
+ constructor(ctx,env){super(ctx,env);this.ctx=ctx;this.db={maxBatchRows:30,prepare:sql=>({bind:(...args)=>({first:async()=>[...ctx.storage.sql.exec(sql,...args)][0]||null,all:async()=>({results:[...ctx.storage.sql.exec(sql,...args)]})})})};
  ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS collector_entries(key TEXT PRIMARY KEY,payload TEXT,next_poll_at INTEGER NOT NULL DEFAULT 0,lease_until INTEGER NOT NULL DEFAULT 0,lease_token TEXT NOT NULL DEFAULT '',last_started_at INTEGER NOT NULL DEFAULT 0,fetch_count INTEGER NOT NULL DEFAULT 0,failure_count INTEGER NOT NULL DEFAULT 0,last_error TEXT);
  CREATE TABLE IF NOT EXISTS broadcast_sessions(handle TEXT PRIMARY KEY,post_id TEXT,space_id TEXT,started_at INTEGER,payload TEXT);
  CREATE TABLE IF NOT EXISTS broadcast_messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,post_id TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(post_id,id));

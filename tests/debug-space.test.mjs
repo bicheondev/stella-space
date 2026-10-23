@@ -61,3 +61,10 @@ test('authenticated Cloudflare debug relay forwards only to the fixed private te
  const result=await operations({method:'GET',headers:{cookie:adminSessionCookie().split(';')[0]}},url,null);assert.equal((await result.json()).execution,'cloudflare');assert.equal(calls,1);
  }finally{globalThis.fetch=original;if(oldOrigin===undefined)delete process.env.SPACELIVE_REALTIME_ORIGIN;else process.env.SPACELIVE_REALTIME_ORIGIN=oldOrigin;if(oldSecret===undefined)delete process.env.CLOUDFLARE_COLLECTOR_SECRET;else process.env.CLOUDFLARE_COLLECTOR_SECRET=oldSecret;}
 });
+
+test('Cloudflare debug archive batches fit the SQLite 100 parameter ceiling',async()=>{
+ const{archiveMessages}=await import('../worker/index.js');const sizes=[];
+ const db={maxBatchRows:30,prepare(){return{bind(...args){sizes.push(args.length);return{first:async()=>null}}}}};
+ await archiveMessages(db,'123456',Array.from({length:75},(_,i)=>({id:String(i),text:'reply'})));
+ assert.deepEqual(sizes,[90,90,45]);
+});
