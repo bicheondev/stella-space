@@ -1,3 +1,4 @@
+import {memberUserIds} from '../worker/member-user-ids.js';
 import {memberHandles, memberNames, findSpacePost, decideSpaceStatus, parseFxReplies, currentParticipants, replyInterval, broadcastHistory, recentBroadcastHistory} from '../worker/index.js';
 
 const GUEST_BEARER = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -16,11 +17,11 @@ function pause(ms, signal) {
 }
 
 // One instance belongs to one Durable Object. Reads never start collection.
-export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pause, handles = memberHandles,
+export function createCollector({db, fetcher = fetch, replyFetcher = null, now = Date.now, sleep = pause, handles = memberHandles,
   onEvent = () => {}, onMembers = () => {}, onMessages = () => {}, onError = () => {}, onBroadcast = () => {}, notificationHealth = () => ({})} = {}) {
   if (!db?.prepare) throw Error('공유 수집 저장소가 연결되지 않았습니다.');
   const members = new Map(handles.map(handle => [handle, {state: {handle, status: 'unknown'}, retained: null, posts: [], sources: {}, due: 0, pending: null, dirty: false, fetchCount: 0}]));
-  const rooms = new Map(), metadataCache = new Map(), pending = new Set(), providerPause = {fx: 0, carry: 0}, providerSlots = {fx: 0, carry: 0};
+  const rooms = new Map(), metadataCache = new Map(), pending = new Set(), providerPause = {fx: 0, carry: 0, replies: 0}, providerSlots = {fx: 0, carry: 0, replies: 0};
   const abort = new AbortController();let timelineSlot=0;
   let initialized = false, initialization, stopped = false, guest = null, guestUntil = 0, guestPending = null, healthDue = 0, healthPending = null, ingestion = Promise.resolve();
   const iso = () => new Date(now()).toISOString();
@@ -38,11 +39,11 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
       if (providerPause[provider] > now()) throw defer(providerPause[provider]);
       const slot = Math.max(now(), providerSlots[provider]);
       if (slot > now() + 2000) throw defer(slot);
-      providerSlots[provider] = slot + (provider === 'fx' ? 67 : 5000);
+      providerSlots[provider] = slot + (provider === 'carry' ? 5000 : 67);
       if (slot > now()) await sleep(slot - now(), abort.signal);
       if (providerPause[provider] > now()) throw defer(providerPause[provider]);
     }
-    const response = await fetcher(url, {...init, headers: {'user-agent': 'Spacelive/1.0 (+https://spacelive.vercel.app)', ...init.headers}, redirect: 'manual', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])});
+    const response = await (provider === 'replies' ? replyFetcher : fetcher)(url, {...init, headers: {'user-agent': 'Spacelive/1.0 (+https://spacelive.vercel.app)', ...init.headers}, redirect: 'manual', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])});
     let data;
     if (response.ok) data = await response.json();
     if (!response.ok || Number(data?.code) === 429) {
@@ -111,7 +112,8 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
       try {
         const base = source === 'fx' ? 'https://api.fxtwitter.com/2/profile/' : 'https://api.carryfeed.com/api/profile/';
         if(source==='fx'){const slot=Math.max(now(),timelineSlot);timelineSlot=slot+200;if(slot>now())await sleep(slot-now(),abort.signal);}
-        const data = await request(base + handle + '/statuses?count=5', {}, source);
+        const account=source==='fx'&&memberUserIds[handle]?'id:'+memberUserIds[handle]:handle;
+        const data = await request(base + account + '/statuses?count=5', {}, source);
         if (data.code !== 200 || !Array.isArray(data.results)) throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
         for(const post of data.results)if(/^\d{2,20}$/.test(post.id||'')&&post.author?.screen_name?.toLowerCase()===handle.toLowerCase())onEvent('post.observed',{handle,postId:post.id,source:'timeline-'+source,postedAt:Number(post.created_timestamp)*1000,observedAt:now()});
         onEvent('timeline.fetched',{handle,source,count:data.results.length});entry.posts = data.results; entry.at = now(); entry.failures = 0; entry.error = null; entry.next = now() + audit;
@@ -224,7 +226,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
     room.fetchCount++; room.lastStarted = now();
     const inserted = [];
     try {
-      const data = parseFxReplies(await request('https://api.fxtwitter.com/2/conversation/' + room.postId + '?ranking_mode=recency', {}, 'fx'), room.postId);
+      const data = parseFxReplies(await request('https://api.fxtwitter.com/2/conversation/' + room.postId + '?ranking_mode=recency', {}, replyFetcher ? 'replies' : 'fx'), room.postId);
       if (stopped || room.retired) return;
       const fresh = data.messages.filter(message => !room.seen.has(message.id));
       for (let offset = 0; offset < fresh.length; offset += 40) {

@@ -1,3 +1,4 @@
+import {fxRelay} from '../server/fx-relay.js';
 import {waitUntil} from '@vercel/functions';
 import {googleAnalyticsTag} from '../server/google-analytics.js';
 import worker from '../worker/index.js';
@@ -16,10 +17,11 @@ export function publicPage(html,origin=''){
  return html.replace("const realtimeOrigin='';",()=> 'const realtimeOrigin='+JSON.stringify(normalized).replace(/</g,'\\u003c')+';').replace('</html>',googleAnalyticsTag+'<script src="/analytics.js" defer></script></html>');
 }
 async function sendResponse(res,response){res.statusCode=response.status;for(const[k,v]of response.headers)if(k!=='set-cookie')res.setHeader(k,v);const cookies=response.headers.getSetCookie();if(cookies.length)res.setHeader('Set-Cookie',cookies);res.end(await response.text());}
-export function createHandler({getDatabase=database,handleOperations=operations,fetchWorker=worker.fetch,environment=process.env,background=waitUntil}={}){
+export function createHandler({getDatabase=database,handleOperations=operations,fetchWorker=worker.fetch,environment=process.env,background=waitUntil,handleFxRelay=fxRelay}={}){
  return async function handler(req,res){
   const url=new URL(req.url,'https://spacelive.vercel.app');
   try{
+   if(url.pathname==='/api/internal/fx-query')return sendResponse(res,await handleFxRelay(req,url));
    const origin=normalizeRealtimeOrigin(environment.SPACELIVE_REALTIME_ORIGIN),method=req.method||'GET';
    // Redirect before opening the database: older tabs must not run another collector.
    if(origin&&publicRealtimeRoutes.has(url.pathname)){

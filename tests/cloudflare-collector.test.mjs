@@ -8,14 +8,14 @@ import {createDatabase} from '../cloudflare/database.js';
 const handle = 'ShirayukiHina_', spaceId = '1KnownSpace', postId = '111';
 const post = (id = postId, space = spaceId, time = 100) => ({id, text: 'https://x.com/i/spaces/' + space, created_timestamp: time, author: {screen_name: handle}});
 const reply = (id, root = postId) => ({id, type: 'status', replying_to: {status: root}, text: '채팅 ' + id, created_timestamp: Number(id), author: {screen_name: 'listener', name: '청자'}});
-function setup({ended = false, history = [], known = true} = {}) {
+function setup({ended = false, history = [], known = true, relay = false} = {}) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../server/session-schema.sql', import.meta.url), 'utf8'));
   if (known) sqlite.prepare('INSERT INTO broadcast_sessions VALUES(?,?,?,?,?)').run(handle, postId, spaceId, 100000, JSON.stringify({handle, space: spaceId, state: ended ? 'Ended' : 'Running', status: ended ? 'offline' : 'live', postUrl: 'https://x.com/' + handle + '/status/' + postId, title: '방송'}));
   for (const message of history) sqlite.prepare('INSERT INTO broadcast_messages(post_id,id,payload) VALUES(?,?,?)').run(postId,message.id,JSON.stringify(message));
   let clock = 1000000, writes = 0, reads = 0, replies = [], audience = 10, metadataState = ended ? 'Ended' : 'Running', metadataFails = false, profileFails = false, conversationStatus = 200, holdReplies = null;
-  const urls = [], events = [], members = [], broadcasts = [];
+  const urls = [], relayCalls = [], events = [], members = [], broadcasts = [];
   const db = {prepare(sql) { return {bind(...args) { const run = all => { if (/^\s*(INSERT|UPDATE|DELETE)/.test(sql)) writes++; else reads++; const query = sqlite.prepare(sql); return all ? {results: query.all(...args)} : query.get(...args) || null; }; return {async first() { return run(false); }, async all() { return run(true); }}; }}; }};
   const fetcher = async (url, init) => {
     urls.push(String(url));
@@ -35,7 +35,7 @@ function setup({ended = false, history = [], known = true} = {}) {
     }
     throw Error('unexpected upstream ' + url);
   };
-  const collector = createCollector({db, fetcher, now: () => clock, sleep: async () => {}, handles: [handle],
+  const collector = createCollector({db, fetcher, replyFetcher:relay?async(url,init)=>{relayCalls.push(String(url));return fetcher(url,init);}:null, now: () => clock, sleep: async () => {}, handles: [handle],
     notificationHealth: () => ({mode: 'push', pushConnected: true, checkedAtMs: clock}),
     onMessages: event => {
       for (const message of event.messages) assert(sqlite.prepare('SELECT id FROM broadcast_messages WHERE post_id=? AND id=?').get(event.postId,message.id), 'commit precedes publish');
@@ -43,7 +43,7 @@ function setup({ended = false, history = [], known = true} = {}) {
     },
     onMembers: states => members.push(states), onBroadcast: event => broadcasts.push(event),
   });
-  return {collector, sqlite, db, urls, events, members, broadcasts, writes: () => writes, reads: () => reads,
+  return {collector, sqlite, db, urls, relayCalls, events, members, broadcasts, writes: () => writes, reads: () => reads,
     advance(ms) { clock += ms; }, setReplies(value) { replies = value; }, setAudience(value) { audience = value; }, setMetadata(value) { metadataState = value; }, failMetadata() { metadataFails = true; }, failProfiles() { profileFails = true; }, restoreProfiles() { profileFails = false; }, limitReplies() { conversationStatus = 429; }, holdReplies(value) { holdReplies = value; },
     async cycle() { collector.step(); await collector.settled(); }, close() { collector.stop(); sqlite.close(); },
   };
@@ -226,4 +226,8 @@ test('failed profile audits retry before the healthy five-minute interval withou
   assert.equal(f.collector.snapshot()[0].status,'unknown');
   f.restoreProfiles();f.advance(61000);await f.cycle();assert.equal(f.collector.snapshot()[0].status,'live');
  }finally{f.close();}
+});
+
+ test('Vercel reply collection continues during a Cloudflare profile cooldown and commits before publish',async()=>{
+ const f=setup({relay:true});f.sqlite.prepare('INSERT INTO collector_entries(key,next_poll_at) VALUES(?,?)').run('budget:pause:fx',999999999);await f.collector.initialize();f.setReplies([reply('1001')]);await f.cycle();assert.equal(f.relayCalls.length,1);assert.equal(f.events.at(-1).messages[0].id,'1001');assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM broadcast_messages').get().n,1);assert.equal(f.urls.some(u=>u.includes('/profile/id:')),false);f.close();
 });

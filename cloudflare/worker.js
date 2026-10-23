@@ -1,3 +1,4 @@
+import {createVercelReplies} from './vercel-replies.js';
 export {SpaceliveDebug} from './debug-space.js';
 import {createEventLog} from './event-log.js';
 import {DurableObject} from 'cloudflare:workers';
@@ -70,7 +71,8 @@ export class SpaceliveCoordinator extends DurableObject {
       this.budget=createRequestBudget({onExhausted:()=>this.replenishSoon(),fetcher:async(...args)=>{this.metrics.upstream++;try{return await fetch(...args);}catch(error){this.metrics.upstreamErrors++;throw error;}}});
       const fetcher=this.fetcher=this.budget.fetch;
       this.db?.close();this.db=createDatabase(this.env,{fetcher});
-      this.collector=createCollector({db:this.db,fetcher,
+      this.replyRelay=this.env.REPLIES_ORIGIN?createVercelReplies({origin:this.env.REPLIES_ORIGIN,secret:this.env.COLLECTOR_SECRET,storage:this.ctx.storage,fetcher,onEvent:(kind,data)=>this.events.record(kind,data)}):null;
+      this.collector=createCollector({db:this.db,fetcher,replyFetcher:this.replyRelay?.fetch,
         onMembers:members=>this.hub.broadcastMembers(members),
         onMessages:data=>{this.metrics.newMessages+=data.messages.length;this.hub.publishRoom(data.postId);},
         onEvent:(kind,data)=>this.events.record(kind,data),
@@ -186,7 +188,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'provider-recovery-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'provider-recovery-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}
