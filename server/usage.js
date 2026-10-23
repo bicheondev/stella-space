@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 const seed=JSON.parse(readFileSync(new URL('./usage-snapshots.json',import.meta.url),'utf8'));
 const definitions={
- vercel:{name:'Vercel',period:'rolling30',url:'https://vercel.com/bicheondevs-projects/~/usage',metrics:[['cpuSeconds','CPU 실행 시간',14400,'seconds'],['memoryGBh','메모리 실행량',360,'GBh'],['invocations','함수 호출',1000000,'count'],['cdnRequests','CDN 요청',1000000,'count']]},
+ vercel:{name:'Vercel',period:'rolling30',url:'https://vercel.com/bicheondevs-projects/~/usage',metrics:[['cpuSeconds','CPU 실행 시간',14400,'seconds'],['memoryGBh','메모리 실행량',360,'GBh'],['invocations','함수 호출',1000000,'count'],['cdnRequests','CDN 요청',1000000,'count'],['originTransferBytes','함수 응답 전송량',10000000000,'bytes'],['dataTransferBytes','데이터 전송량',100000000000,'bytes']]},
  cloudflare:{name:'Cloudflare',period:'daily',url:'https://dash.cloudflare.com/4465bbcc09f7b9f879ca63f37780539d/workers/durable-objects',metrics:[['workerRequests','Worker 요청',100000,'count'],['doRequests','Durable Object 요청',100000,'count'],['durationGBs','Durable Object 실행량',13000,'GBs'],['rowsRead','SQL 읽기',5000000,'count'],['rowsWritten','SQL 쓰기',100000,'count']]},
  turso:{name:'Turso',period:'monthly',url:'https://app.turso.tech/vercel-icfg-gzbu4kpfyqxxo2dtjuz3abt3',metrics:[['rowsRead','읽기',500000000,'count'],['rowsWritten','쓰기',10000000,'count'],['storageBytes','저장공간',5000000000,'bytes']]}
 };
