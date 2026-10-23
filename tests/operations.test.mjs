@@ -120,7 +120,7 @@ test('debug chat requires operations authentication and reuses service chat with
  assert.equal((await operations({method:'GET',headers:{}},url('/api/admin/debug-chat'),db)).status,404);
  const page=await operations({headers:{cookie:adminSessionCookie().split(';')[0]}},url('/ops/debug'),null);assert.equal(page.status,200);assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');
  const cookie=adminSessionCookie().split(';')[0],html=await page.text();assert(html.includes('Space 온라인 / 오프라인 감지'));assert(html.includes('Space 채팅 수집 감지'));assert(html.includes("e.source!==$('chat').contentWindow"));new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
- const chat=await operations({method:'GET',headers:{cookie}},url('/api/admin/debug-chat'),db),body=await chat.text();assert(body.includes('채팅방에 오신 것을 환영합니다!'));assert(body.includes('Space 또는 공유 게시물 URL 테스트'));assert(body.includes('event.source!==parent'));assert(!body.includes('googletagmanager'));for(const script of body.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
+ const chat=await operations({method:'GET',headers:{cookie}},url('/api/admin/debug-chat'),db),body=await chat.text();assert(body.includes('채팅방에 오신 것을 환영합니다! 스페라이브는 아직 베타 버전이에요.'));assert(body.includes('Space 또는 공유 게시물 URL 테스트'));assert(body.includes('event.source!==parent'));assert(!body.includes('googletagmanager'));for(const script of body.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
  }finally{client.close()}
 });
 
