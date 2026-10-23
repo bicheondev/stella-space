@@ -4,5 +4,5 @@ CREATE INDEX IF NOT EXISTS broadcast_messages_post_seq ON broadcast_messages(pos
 CREATE TABLE IF NOT EXISTS collector_errors(id INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,key TEXT NOT NULL,error TEXT NOT NULL);
 DROP TABLE IF EXISTS visitor_daily;
 CREATE TABLE IF NOT EXISTS operations_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS feedback_messages(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL,message TEXT NOT NULL,member TEXT,delivery TEXT NOT NULL DEFAULT 'pending',error TEXT,attempted_at INTEGER);
+CREATE TABLE IF NOT EXISTS feedback_messages(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL,message TEXT NOT NULL,member TEXT,delivery TEXT NOT NULL DEFAULT 'pending',error TEXT,attempted_at INTEGER,urgent INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS feedback_limits(key TEXT PRIMARY KEY,bucket INTEGER NOT NULL,used INTEGER NOT NULL);
