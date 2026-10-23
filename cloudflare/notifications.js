@@ -224,7 +224,10 @@ export function createNotificationReceiver({
           }
           const data = await response.json();
           if (data.errors?.length) throw Error('알림함 조회 실패');
-          const posts = notificationPosts(data).filter(post => !seen.has(post.id));
+          const observedAt=now();
+          const allPosts=notificationPosts(data);
+          for(const post of allPosts)onEvent('post.observed',{handle:post.author?.screen_name,postId:post.id,source:fromPush?'push-inbox':'fallback-inbox',postedAt:Number(post.created_timestamp)*1000,observedAt,...(fromPush&&lastPushAt?{pushReceivedAt:lastPushAt}:{})});
+          const posts = allPosts.filter(post => !seen.has(post.id));
           if (!active(token)) return;
           if (posts.length) await onPosts(posts, {signal: scanSignal});
           if (!active(token)) return;

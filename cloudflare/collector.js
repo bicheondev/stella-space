@@ -111,6 +111,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
         const base = source === 'fx' ? 'https://api.fxtwitter.com/2/profile/' : 'https://api.carryfeed.com/api/profile/';
         const data = await request(base + handle + '/statuses?count=5', {}, source);
         if (data.code !== 200 || !Array.isArray(data.results)) throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
+        for(const post of data.results)if(/^\d{2,20}$/.test(post.id||'')&&post.author?.screen_name?.toLowerCase()===handle.toLowerCase())onEvent('post.observed',{handle,postId:post.id,source:'timeline-'+source,postedAt:Number(post.created_timestamp)*1000,observedAt:now()});
         onEvent('timeline.fetched',{handle,source,count:data.results.length});entry.posts = data.results; entry.at = now(); entry.failures = 0; entry.error = null; entry.next = now() + audit;
         return {posts: combinePosts(member.posts, entry.posts), source: member.posts.length ? 'x-notifications' : source, fresh: true};
       } catch (error) {

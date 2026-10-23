@@ -149,3 +149,13 @@ on storage failure and never blocks collection by throwing. This trail begins
 with this deployment; it cannot reconstruct earlier missing receive times.
 SQLite writes/storage consume the existing Free allocation; routine checks are
 not logged per viewer or every five-second member check.
+
+`post.observed` preserves each post's first observation separately for
+`push-inbox`, `fallback-inbox`, `timeline-fx`, and `timeline-carry`, before
+application deduplication. A durable `(post_id, source)` marker prevents a
+restart from replacing the original timestamp. `observedAt` is response parse
+time; `pushReceivedAt` is the latest notification that triggered that scan.
+The underlying push does not identify a post, so correlation is a candidate,
+not proof of a per-post push delivery time. Normal fallback schedules remain
+unchanged so comparisons measure real operating conditions. Markers expire
+with the 30-day audit retention.
