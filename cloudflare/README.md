@@ -178,3 +178,8 @@ conversation polling and push processing cadences are unchanged. Safe private
 provider status/retry audit events aid future diagnosis. Temporary provider
 probe endpoints were removed. This improves client recovery; it does not claim
 to eliminate third-party rate limits or make Carryfeed an independent backend.
+
+An old retained Space returning Ended proves only that session ended. During a
+fresh-feed outage it no longer authoritatively declares the member offline.
+A transition from a previously Running session to explicitly Ended still stops
+chat collection immediately; discovering a new Running session takes priority.

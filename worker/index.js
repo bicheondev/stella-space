@@ -114,7 +114,7 @@ async function discoverTimeline(db,handle){
 export function decideSpaceStatus({prior,found,candidate,previous,feedFresh}){
  if(found&&candidate?.state==='Running')return{...found,state:'Running',status:'live',startedAt:candidate.started_at??null,currentParticipants:candidate.currentParticipants??null,title:candidate.title||found.title,authoritative:true};
  if(prior&&previous?.state==='Running')return{...prior,state:'Running',status:'live',startedAt:previous.started_at??prior.startedAt??null,currentParticipants:previous.currentParticipants??null,authoritative:true};
- if(prior&&previous?.state==='Ended')return{...prior,state:'Ended',status:'offline',currentParticipants:null,authoritative:true};
+ if(prior&&previous?.state==='Ended'){const currentKnown=prior.state!=='Ended'||feedFresh;return{...prior,state:'Ended',status:currentKnown?'offline':'unknown',currentParticipants:null,authoritative:!!currentKnown};}
  if(found&&candidate?.state==='Ended')return{...found,state:'Ended',status:'offline',currentParticipants:null,authoritative:true};
  // A missing link or a failed request is never evidence that a known live Space ended.
  if(prior?.state==='Running')return{...prior,state:'Unknown',status:'unknown',lastKnownState:'Running',currentParticipants:null};

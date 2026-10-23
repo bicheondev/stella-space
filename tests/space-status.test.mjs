@@ -22,3 +22,11 @@ test('only a verified new live Space replaces the previous broadcast',()=>{
 test('five-post offline heuristic applies only when no known running Space requires verification',()=>{
  assert.equal(decideSpaceStatus({feedFresh:true}).status,'offline');assert.equal(decideSpaceStatus({feedFresh:false}).status,'unknown');
 });
+test('rechecking an old ended Space does not prove that no new broadcast exists during a timeline outage',()=>{
+ const ended={...prior,state:'Ended',status:'offline'};
+ const unknown=decideSpaceStatus({prior:ended,previous:{state:'Ended'},feedFresh:false});
+ assert.equal(unknown.status,'unknown');assert.equal(unknown.state,'Ended');assert.equal(unknown.authoritative,false);
+ assert.equal(decideSpaceStatus({prior:ended,previous:{state:'Ended'},feedFresh:true}).status,'offline');
+ const next=decideSpaceStatus({prior:ended,previous:{state:'Ended'},found:{space:'new',postUrl:'https://x.com/test/status/999'},candidate:{state:'Running'},feedFresh:false});
+ assert.equal(next.status,'live');assert.equal(next.space,'new');
+});
