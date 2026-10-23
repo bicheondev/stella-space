@@ -1,3 +1,4 @@
+import {createDebugSession} from './debug-session.js';
 import {createVercelReplies} from './vercel-replies.js';
 export {SpaceliveDebug} from './debug-space.js';
 import {createEventLog} from './event-log.js';
@@ -11,7 +12,7 @@ import {broadcastWebhook,enqueuePostNotifications} from '../server/broadcast-web
 import {memberNames} from '../worker/index.js';
 
 const PUBLIC_ROUTES = new Set(['/api/members','/api/member','/api/resolve','/api/replies','/api/chat-history','/api/live','/health']);
-const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/reply-probe','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history']);
+const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/reply-probe','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history','/control/debug/stop']);
 const WATCHDOG_MS = 30000;
 const json = (value, status = 200) => Response.json(value, {status, headers: {'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const count = value => { const number = Number(value || 0); if (!Number.isSafeInteger(number) || number < 0) throw Error('Invalid cursor'); return number; };
@@ -32,12 +33,12 @@ export default {
     const isControl = CONTROL_ROUTES.has(url.pathname);
     if (!PUBLIC_ROUTES.has(url.pathname) && !isControl) return json({error:'Not found'},404);
     if (isControl && !await authorized(request,env)) return json({error:'Unauthorized'},401);
-    if (isControl && request.method !== ((['/control/status','/control/events','/control/reply-probe'].includes(url.pathname)||url.pathname.startsWith('/control/debug/')) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
+    if (isControl && request.method !== ((['/control/status','/control/events','/control/reply-probe'].includes(url.pathname)||(url.pathname.startsWith('/control/debug/')&&url.pathname!=='/control/debug/stop')) ? 'GET' : 'POST')) return json({error:'Method not allowed'},405);
     if (!isControl && origin && origin !== publicOrigin(env)) return json({error:'Origin not allowed'},403);
     if (!isControl && request.method === 'OPTIONS') return new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':publicOrigin(env),'Access-Control-Allow-Methods':'GET','Access-Control-Max-Age':'86400','Vary':'Origin'}});
     if (!isControl && request.method !== 'GET') return json({error:'Method not allowed'},405);
     if (url.pathname === '/api/live' && (origin !== publicOrigin(env) || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket')) return json({error:'WebSocket required'},400);
-    if(url.pathname.startsWith('/control/debug/')){const target=new URL(request.url);target.pathname=target.pathname.replace('/control/debug/','/api/');return env.DEBUGGER.getByName('external-debug-v2').fetch(new Request(target));}
+
     if (url.pathname === '/control/retire-previous') {
       const results=[];
       for(const name of ['spacelive','spacelive-v2']) {const response=await env.COORDINATOR.getByName(name).fetch(new Request('https://coordinator/control/stop',{method:'POST'}));results.push({name,status:response.status,...await response.json()});}
@@ -82,6 +83,8 @@ export class SpaceliveCoordinator extends DurableObject {
         notificationHealth:()=>this.receiver?.status() || {},
       });
       await this.collector.initialize();
+      this.debugReplyRelay=this.env.REPLIES_ORIGIN?createVercelReplies({origin:this.env.REPLIES_ORIGIN,secret:this.env.COLLECTOR_SECRET,storage:this.ctx.storage,fetcher,monthlyLimit:10000,budgetKey:'vercel-debug-replies-budget'}):null;
+      this.debugSession=createDebugSession({sql:this.ctx.storage.sql,fetcher,replyFetcher:this.debugReplyRelay?.fetch,production:this.collector,notificationHealth:()=>this.receiver?.status()||{}});
       this.receiver=createNotificationReceiver({onEvent:(kind,data)=>this.events.record(kind,data),db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onObservedPosts:async posts=>{const queued=await enqueuePostNotifications(this.db,posts,{notBefore:Date.parse(this.env.POST_TIMING_SINCE||''),names:memberNames});if(queued)this.retryWebhookAt=0;},onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
       this.ready=true;
     })().catch(error=>{this.boot=null;this.lastError='Initialization failed';throw error;});
@@ -110,7 +113,7 @@ export class SpaceliveCoordinator extends DurableObject {
   }
   kick() {
     if (!this.enabled || !this.ready || this.timer) return;
-    const delay=this.collector.step();
+    const delay=Math.min(this.collector.step(),this.debugSession?.step()??1000);
     if (!this.receiverPending && Date.now()>=this.receiverDue) {
       this.receiverDue=Date.now()+1000;
       this.receiverPending=this.receiver.step().catch(error=>this.recordError({key:'cloudflare:push',error:error.message})).finally(()=>{this.receiverPending=null;});
@@ -136,7 +139,7 @@ export class SpaceliveCoordinator extends DurableObject {
     await this.ctx.storage.put('enabled',false);
     if(this.alarmWrite)await this.alarmWrite;
     await this.ctx.storage.deleteAlarm();this.nextAlarmAt=0;
-    this.collector?.stop();this.lifetime?.abort();
+    await this.debugSession?.stop();this.collector?.stop();this.lifetime?.abort();
     this.budget?.reset();
     await Promise.allSettled([this.receiver?.stop(),this.collector?.settled(),this.receiverPending,this.webhookPending]);
     this.budget?.close();this.ready=false;this.boot=null;this.receiver=null;this.collector=null;
@@ -167,6 +170,7 @@ export class SpaceliveCoordinator extends DurableObject {
       }
       if (url.pathname==='/health') return json({ready:this.ready,collecting:this.enabled});
       await this.initialize();
+      if(url.pathname.startsWith('/control/debug/')){if(!this.enabled)return json({error:'운영 수집기가 중지되어 있습니다.'},503);return this.debugSession.fetch(request);}
       // Public traffic only reads; alarms and the private start control own scheduling.
       if (url.pathname==='/api/live') {
         if(this.ctx.getWebSockets().length>=2000) return json({error:'Connection limit'},503);
@@ -194,7 +198,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'post-timing-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,postTiming:{enabled:!!this.env.POST_TIMING_SINCE,since:this.env.POST_TIMING_SINCE||null},notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'production-debug-20261024',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,postTiming:{enabled:!!this.env.POST_TIMING_SINCE,since:this.env.POST_TIMING_SINCE||null},notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}

@@ -55,3 +55,9 @@ FxTwitter 호출은 분당 900회를 목표로 공통 67ms 슬롯을 예약합�
 - xnotif (MIT): https://github.com/yutakobayashidev/xnotif
 
 Cloudflare의 저장된 활성 상태와 알람으로 수집기를 복구합니다. Actions의 다음 수집기 예약은 레거시 복구 모드에서만 사용합니다.
+
+### 운영 경로 디버깅과 무료 사용량
+
+`/ops/debug`의 URL 테스트는 실행 위치를 선택하지 않는다. 등록된 방송은 실제 운영 수집 기록을 읽고, 외부 Space는 같은 `createCollector`와 Cloudflare→Vercel 답글 경로를 사용한다. 외부 테스트 데이터는 기존 coordinator의 `debug_*` SQLite 테이블에만 저장되며, 운영 세션·Turso 채팅·웹훅에 섞이지 않는다. 별도 상시 실행 Durable Object는 만들지 않는다. 외부 테스트는 15분에 자동 종료되며, 화면 조회는 최소 1초 간격이다. 운영 WebSocket 전송 지연을 완전히 재현하는 시험은 아니다. Vercel 외부 요청은 실제 무료 사용량에 포함되지만, 테스트의 30일 1만 회 예산은 운영 답글 25만 회 예약과 분리된다.
+
+무료 사용량 패널은 `server/usage-snapshots.json`의 날짜가 표시된 대시보드 확인값과 관리자 저장값을 표시한다. 자동 계정 사용량 API 연결은 아직 없으며, 페이지는 실시간 사용량이라고 표시하지 않는다. `/api/admin/usage` GET은 5분 캐시를 사용하고 POST는 소유자 로그인·동일 Origin을 요구한다. 서비스별 숫자 입력으로 갱신할 수 있다. Vercel은 최근 30일이므로 초기화 카운트다운을 만들지 않으며, Cloudflare는 UTC 00:00(KST 09:00) 일일 초기화와 함께 이전 날짜의 일일 확인값을 무효화한다. Turso 주기 종료는 확인된 시각을 입력한 경우에만 표시한다. 저장공간은 초기화 대상이 아니다. 미확인 수치는 0%로 표현하지 않는다.

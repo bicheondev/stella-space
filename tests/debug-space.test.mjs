@@ -45,11 +45,11 @@ test('private debug endpoint rejects anonymous callers before production databas
  const cookie=adminSessionCookie().split(';')[0];const page=await operations({method:'GET',headers:{cookie}},new URL(base+'/api/admin/debug-chat'),null);const html=await page.text();assert(html.includes('let realtimeOrigin='));for(const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script[1]);
 });
 
-test('debug snapshots preserve a browser cursor when an ephemeral server archive restarts',async()=>{
+test('production debug preserves durable history cursors and older-page flags',async()=>{
  const seen=new Set();let close=0,history=[];
  const ctx=vm.createContext({api:async()=>{throw Error('external test must use private API')},fetch:async()=>Response.json({messages:[{id:'111'}],historyCursor:1,hasOlder:true}),Response,AbortSignal,crypto,performance,Date,location:{origin:base},parent:{postMessage(){}},generation:1,room:{tweet:'123456'},seen,auto:false,document:{hidden:false},realtime:{close(){close++}},realtimeOrigin:'https://realtime.example',connect:async()=>{},requestAnimationFrame(){}});
  vm.runInContext(debugChatScript.slice(0,debugChatScript.indexOf('const debugButton=')),ctx);await vm.runInContext("debugConnect('test')",ctx);assert.equal(close,1);
- const first=await vm.runInContext("api('/api/replies?id=123456')",ctx);seen.add('111');const next=await vm.runInContext("api('/api/replies?id=123456')",ctx);assert.equal(first.historyCursor,1);assert.equal(next.historyCursor,1);assert.equal(next.hasOlder,false);
+ const first=await vm.runInContext("api('/api/replies?id=123456')",ctx);seen.add('111');const next=await vm.runInContext("api('/api/replies?id=123456')",ctx);assert.equal(first.historyCursor,1);assert.equal(next.historyCursor,1);assert.equal(next.hasOlder,true);
 });
 
 test('authenticated Cloudflare debug relay forwards only to the fixed private test path',async()=>{

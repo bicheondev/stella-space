@@ -2,17 +2,17 @@
 export const debugChatScript=String.raw`
 const debugSend=value=>parent.postMessage({type:'space-debug',...value},location.origin);
 const debugOriginalApi=api;
-let debugHistoryReady=false,debugExternal=false,debugCursor=0,debugRuntime='cloudflare';
-async function debugConnect(value,runtime='cloudflare'){debugRuntime=runtime==='vercel'?'vercel':'cloudflare';debugExternal=true;debugCursor=0;realtime?.close();realtimeOrigin='';await connect(value);}
+let debugHistoryReady=false,debugExternal=false,debugCursor=0;
+async function debugConnect(value){debugExternal=true;debugCursor=0;realtime?.close();realtimeOrigin='';await connect(value);}
 api=async function(path){
  const requestId=crypto.randomUUID(),requestStart=performance.now(),requestGeneration=generation;debugSend({event:'request',path,requestId,at:Date.now()});
  try{
  let result;
  if(debugExternal&&/^\/api\/(resolve|replies|chat-history)\?/.test(path)){
   if(document.hidden)await new Promise(resolve=>{const resume=()=>{if(!document.hidden){document.removeEventListener('visibilitychange',resume);resolve();}};document.addEventListener('visibilitychange',resume);});
-  const response=await fetch(path.replace('/api/','/api/admin/debug-space/'+(debugRuntime==='cloudflare'?'cloudflare/':'')),{cache:'no-store',signal:AbortSignal.timeout(15000)});
-  result=await response.json();result.execution=debugRuntime;if(!response.ok){const error=Error(result.error||'테스트 조회에 실패했습니다.');error.status=response.status;error.retryAfterMs=Math.max(0,Number(response.headers.get('retry-after'))||0)*1000;throw error;}
-  if(path.startsWith('/api/replies')){debugCursor+=(result.messages||[]).filter(message=>!seen.has(message.id)).length;result.historyCursor=debugCursor;result.hasOlder=false;}
+  const response=await fetch(path.replace('/api/','/api/admin/debug-space/production/'),{cache:'no-store',signal:AbortSignal.timeout(15000)});
+  result=await response.json();result.execution='production';if(!response.ok){const error=Error(result.error||'테스트 조회에 실패했습니다.');error.status=response.status;error.retryAfterMs=Math.max(0,Number(response.headers.get('retry-after'))||0)*1000;throw error;}
+
  }else result=await debugOriginalApi(path);
  debugSend({event:'response',path,requestId,at:Date.now(),result});
  if(path.startsWith('/api/resolve')&&requestGeneration===generation){debugHistoryReady=false;debugCursor=0;debugSend({event:'latency-reset'});}
@@ -36,5 +36,5 @@ api=async function(path){
 const debugButton=document.createElement('button');debugButton.className='iconbtn';debugButton.title='Space 또는 공유 게시물 URL 테스트';debugButton.setAttribute('aria-label',debugButton.title);debugButton.textContent='🔗';
 debugButton.onclick=()=>{const value=prompt('X Space 또는 Space 공유 게시물 URL을 입력해 주세요.');if(value?.trim())debugConnect(value.trim());};document.querySelector('.toolbar-actions').prepend(debugButton);
 $('connection').hidden=false;$('streamInfo').hidden=false;$('listeners').hidden=false;
-addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==parent)return;if(event.data?.type==='debug-stop'){++generation;clearTimeout(poll);room=null;debugExternal=false;connecting=false;$('connection').textContent='○ 테스트 종료';return;}if(event.data?.type==='debug-connect')debugConnect(String(event.data.url||''),event.data.runtime);});
+addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==parent)return;if(event.data?.type==='debug-stop'){++generation;clearTimeout(poll);room=null;debugExternal=false;void fetch('/api/admin/debug-space/production/stop',{method:'POST'});connecting=false;$('connection').textContent='○ 테스트 종료';return;}if(event.data?.type==='debug-connect')debugConnect(String(event.data.url||''));});
 `;

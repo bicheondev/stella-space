@@ -1,3 +1,4 @@
+import {readUsage,saveUsage} from './usage.js';
 import {readOverview} from './overview.js';
 import {receiveFeedback,feedbackAdmin} from './feedback.js';
 import {webPushControl,saveXSession,notificationStatus,notificationConfig,collectorAuthorized,receiveNotificationEvent} from './x-notifications.js';
@@ -17,12 +18,13 @@ export async function operations(req,url,db){
  if(url.pathname==='/ops/debug')return new Response(debugPage,{headers:{...privateHeaders,'Content-Type':'text/html;charset=utf-8'}});
  if(url.pathname.startsWith('/api/admin/debug-space/')){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
-  if(url.pathname.startsWith('/api/admin/debug-space/cloudflare/')){
-   if((req.method||'GET')!=='GET')return json({},405);
-   const route=url.pathname.split('/').at(-1);if(!['resolve','replies','chat-history'].includes(route))return json({},404);
+  if(url.pathname.startsWith('/api/admin/debug-space/production/')||url.pathname.startsWith('/api/admin/debug-space/cloudflare/')){
+   const route=url.pathname.split('/').at(-1);if(!['resolve','replies','chat-history','stop'].includes(route))return json({},404);
+   if((req.method||'GET')!==(route==='stop'?'POST':'GET'))return json({},405);
+   if(route==='stop'&&req.headers.origin!==url.origin)return json({},403);
    const secret=process.env.CLOUDFLARE_COLLECTOR_SECRET||process.env.COLLECTOR_SECRET;const origin=process.env.SPACELIVE_REALTIME_ORIGIN;
    if(!secret||!origin)return json({error:'Cloudflare 테스트 연결 설정이 없습니다.'},503);
-   const target=new URL('/control/debug/'+route,origin);target.search=url.search;const result=await fetch(target,{headers:{Authorization:'Bearer '+secret.trim()},redirect:'error',signal:AbortSignal.timeout(20000)});
+   const target=new URL('/control/debug/'+route,origin);target.search=url.search;const result=await fetch(target,{method:route==='stop'?'POST':'GET',headers:{Authorization:'Bearer '+secret.trim()},redirect:'error',signal:AbortSignal.timeout(20000)});
    return new Response(await result.text(),{status:result.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store',...(result.headers.get('retry-after')?{'Retry-After':result.headers.get('retry-after')}:{})}});
   }
   return debugSpace(new Request(url,{method:req.method||'GET'}));
@@ -80,6 +82,13 @@ export async function operations(req,url,db){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   const provider=url.searchParams.get('provider')||'vercel';if(!['vercel','ga'].includes(provider))return json({error:'지원하지 않는 통계 제공자입니다.'},400);
   return json(await (provider==='ga'?gaAnalytics(db):visitorAnalytics(db)));
+ }
+ if(url.pathname==='/api/admin/usage'){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  if(req.method==='GET')return json(await readUsage(db));
+  if(req.method!=='POST')return json({},405);
+  if(req.headers.origin!==url.origin)return json({},403);
+  try{return json(await saveUsage(db,typeof req.body==='string'?JSON.parse(req.body):req.body));}catch(e){return json({error:e.message},400);}
  }
  if(url.pathname==='/api/admin/overview'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);

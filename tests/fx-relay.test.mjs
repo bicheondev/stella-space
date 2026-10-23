@@ -29,3 +29,7 @@ test('rolling safety allocation does not reset at a month boundary',async()=>{
  await relay.fetch('https://api.fxtwitter.com/2/conversation/123');clock+=120000;
  await assert.rejects(relay.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);clock+=29*86400000;await assert.rejects(relay.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);clock+=2*86400000;await relay.fetch('https://api.fxtwitter.com/2/conversation/123');
 });
+test('debug relay uses an independent bounded allocation without spending production reservations',async()=>{
+ const values=new Map(),storage={get:async k=>values.get(k),put:async(k,v)=>values.set(k,v)},config={origin:'https://spacelive.vercel.app',secret:'s',storage,fetcher:async()=>Response.json({})};
+ const debug=createVercelReplies({...config,budgetKey:'vercel-debug-replies-budget',monthlyLimit:1});await debug.fetch('https://api.fxtwitter.com/2/conversation/123');await assert.rejects(debug.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);assert.equal(values.has('vercel-replies-budget'),false);const production=createVercelReplies({...config,monthlyLimit:2});await production.fetch('https://api.fxtwitter.com/2/conversation/123');assert.equal(production.status().used,1);
+});
