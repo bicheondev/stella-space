@@ -27,6 +27,7 @@ test('migrated public reads redirect to CF without opening the Vercel database o
 test('migration stops public collection and authenticates heartbeat before its migration response',async()=>{
  const forbidden=()=>{throw Error('must not run');};const handler=createHandler({environment:{SPACELIVE_REALTIME_ORIGIN:'https://realtime.example',COLLECTOR_SECRET:'test-key'},getDatabase:forbidden,handleOperations:forbidden,fetchWorker:forbidden});
  const collect=response();await handler({url:'/api/collect-live',method:'GET',headers:{}},collect);assert.equal(JSON.parse(collect.body).migrated,true);assert.equal(JSON.parse(collect.body).pollIntervalMs,60000);
+ for(const path of ['/api/notification-push','/api/notification-config','/api/notification-event']){const old=response();await handler({url:path,method:'POST',headers:{}},old);assert.equal(old.statusCode,410);assert.equal(JSON.parse(old.body).migrated,true);}
  const unauth=response();await handler({url:'/api/heartbeat',method:'GET',headers:{}},unauth);assert.equal(unauth.statusCode,401);
  const heartbeat=response();await handler({url:'/api/heartbeat',method:'GET',headers:{authorization:'Bearer test-key'}},heartbeat);assert.equal(heartbeat.statusCode,200);assert.equal(JSON.parse(heartbeat.body).migrated,true);
 });

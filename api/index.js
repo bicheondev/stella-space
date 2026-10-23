@@ -28,6 +28,7 @@ export function createHandler({getDatabase=database,handleOperations=operations,
    }
    if(url.pathname==='/api/heartbeat'&&(!environment.COLLECTOR_SECRET||req.headers.authorization!=='Bearer '+environment.COLLECTOR_SECRET.trim()))return sendResponse(res,new Response('Unauthorized',{status:401}));
    if(origin&&(url.pathname==='/api/collect-live'||url.pathname==='/api/heartbeat'))return sendResponse(res,Response.json({migrated:true,liveCount:0,rooms:[],pollIntervalMs:60000},{headers:{'Cache-Control':'no-store'}}));
+   if(origin&&['/api/notification-push','/api/notification-config','/api/notification-event'].includes(url.pathname))return sendResponse(res,Response.json({migrated:true},{status:410,headers:{'Cache-Control':'no-store'}}));
    const operation=await handleOperations(req,url,url.pathname.startsWith('/api/')?getDatabase():null);
    if(operation)return sendResponse(res,operation);
    let result;
