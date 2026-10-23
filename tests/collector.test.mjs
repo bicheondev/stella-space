@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot,collectLiveRooms,rememberBroadcast,archiveMessages,broadcastHistory} from '../worker/index.js';
+import worker,{sharedCollect,findSpacePost,replyInterval,reserveFxSlot,collectLiveRooms,rememberBroadcast,archiveMessages,broadcastHistory,recentBroadcastHistory} from '../worker/index.js';
 const migration=readFileSync(new URL('../drizzle/0000_windy_bushwacker.sql',import.meta.url),'utf8');
 function binding(sqlite){
  return {
@@ -112,6 +112,7 @@ test('broadcast history keeps more than 500 replies, survives ending, and separa
  const old={handle:'member',space:'room-one',postUrl:'https://x.com/member/status/111',state:'Running',status:'live'};
  await rememberBroadcast(dbA,old,1000);
  const messages=Array.from({length:625},(_,i)=>({id:String(i),text:'message '+i,time:i}));await archiveMessages(dbA,'111',messages);await archiveMessages(dbA,'111',messages);
+ const latest=await recentBroadcastHistory(dbA,'111');assert.equal(latest.messages.length,200);assert.equal(latest.messages[0].id,'425');assert.equal(latest.messages.at(-1).id,'624');assert.equal(latest.hasOlder,true);const older=await recentBroadcastHistory(dbA,'111',latest.olderCursor);assert.equal(older.messages[0].id,'225');assert.equal(older.messages.at(-1).id,'424');const oldest=await recentBroadcastHistory(dbA,'111',(await recentBroadcastHistory(dbA,'111',older.olderCursor)).olderCursor);assert.equal(oldest.hasOlder,false);assert.equal(oldest.messages[0].id,'0');await archiveMessages(dbA,'111',[{id:'new',text:'new message'}]);const delta=await broadcastHistory(dbA,'111',latest.historyCursor);assert.equal(delta.messages.length,1);assert.equal(delta.messages[0].id,'new');await dbA.prepare("DELETE FROM broadcast_messages WHERE id='new'").bind().first();
  const first=await broadcastHistory(dbA,'111');assert.equal(first.messages.length,500);assert.equal(first.hasMore,true);
  const rest=await broadcastHistory(dbA,'111',first.historyCursor);assert.equal(rest.messages.length,125);assert.equal(rest.hasMore,false);
  await rememberBroadcast(dbA,{...old,state:'Ended',status:'offline'},1000);
