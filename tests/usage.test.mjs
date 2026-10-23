@@ -24,3 +24,7 @@ test('saved usage merges providers, caches reads, and does not expose arbitrary 
  const result=await saveUsage(db,{providers:{vercel:{period:'rolling30',checkedAt:new Date(now).toISOString(),source:'<script>bad</script>',metrics:{cpuSeconds:12000}}}},{now});assert.equal(result.providers[0].metrics[0].used,12000);assert(!stored.includes('<script>'));assert.equal(result.providers[0].resetsAt,null);
  await saveUsage(db,{providers:{cloudflare:{period:'daily',checkedAt:new Date(now).toISOString(),metrics:{durationGBs:100}}}},{now});const both=await readUsage(db,{now});assert.equal(both.providers[0].metrics[0].used,12000);assert.equal(both.providers[1].metrics[2].used,100);
 });
+test('usage edits require the owner session and same-origin POST',async()=>{
+ const {operations}=await import('../server/operations.js');const {adminSessionCookie}=await import('../server/admin-auth.js');process.env.ADMIN_SESSION_SECRET='usage-edit-test-secret';
+ const url=new URL('https://spacelive.vercel.app/api/admin/usage');assert.equal((await operations({method:'GET',headers:{}},url,null)).status,404);const cookie=adminSessionCookie().split(';')[0];assert.equal((await operations({method:'POST',headers:{cookie,origin:'https://other.example'}},url,null)).status,403);assert.equal((await operations({method:'DELETE',headers:{cookie}},url,null)).status,405);
+});
