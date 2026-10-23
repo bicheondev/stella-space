@@ -335,3 +335,11 @@ test('notification delivery failures are isolated and push observations retain t
  const observed=events.filter(e=>e.kind==='post.observed');assert.equal(observed[0].payload.source,'fallback-inbox');assert.equal(observed.at(-1).payload.source,'push-inbox');assert.equal(observed.at(-1).payload.pushReceivedAt,101234);assert.equal(observed.at(-1).payload.pushDetectedAt,101234);assert.equal(f.receiver.status().error,null);assert.equal(f.calls.posts.length,1);assert.equal(observations.length,2);
  }finally{await f.receiver.stop()}
 });
+
+test('a push arriving during a fallback scan does not relabel that response as a push observation',async()=>{
+ let calls=0,release;const gate=new Promise(r=>release=r),observations=[];
+ const f=fixture({fetcher:async()=>{calls++;if(calls===2)await gate;return Response.json(inbox(String(122+calls)));},onObservedPosts:async posts=>observations.push(...posts)});
+ try{await step(f.receiver);f.advance(30000);await f.receiver.step();await new Promise(r=>setImmediate(r));assert.equal(calls,2);f.advance(2000);const push=f.calls.opens[0].onNotification();release();await push;await f.receiver.idle();
+ const fallback=observations.find(p=>p.id==='124'),triggered=observations.find(p=>p.id==='125');assert.equal(fallback.timing.source,'fallback-inbox');assert.equal(fallback.timing.pushReceivedAt,null);assert.equal(triggered.timing.source,'push-inbox');assert.equal(triggered.timing.pushReceivedAt,132000);
+ }finally{release();await f.receiver.stop()}
+});
