@@ -58,7 +58,7 @@ test('public snapshots, resolve and cached chat reads never collect or write', a
     assert.equal((await f.collector.room(postId)).messages.length,1);
   }
   assert.equal(f.urls.length,0); assert.equal(f.writes(),writes); assert.equal(f.reads(),initialReads);
-  await assert.rejects(f.collector.resolve('https://x.com/unknown/status/999'), /수집되지/);
+  await assert.rejects(f.collector.resolve('https://x.com/unknown/status/999'), {code:'UNTRACKED_SPACE',status:404});
   assert.equal(f.urls.length,0); f.close();
 });
 

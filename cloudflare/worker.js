@@ -181,7 +181,7 @@ export class SpaceliveCoordinator extends DurableObject {
       }
       if(url.pathname==='/api/replies')return json(await this.collector.room(id,{after:count(url.searchParams.get('after')),latest:url.searchParams.get('latest')==='1'}));
       return json({error:'Not found'},404);
-    }catch(error){console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
+    }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
     return {revision:'provider-recovery-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};

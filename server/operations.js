@@ -5,6 +5,7 @@ import {gaAnalytics,saveGaConfig} from './ga-analytics.js';
 import {readFileSync} from 'node:fs';
 import {initialPage,memberHandles} from '../worker/index.js';
 import {debugChatScript} from './debug-chat.js';
+import {debugSpace} from './debug-space.js';
 const debugPage=readFileSync(new URL('./debug.html',import.meta.url),'utf8');
 import {visitorAnalytics,saveAnalyticsToken} from './visitor-analytics.js';
 const page=readFileSync(new URL('./operations.html',import.meta.url),'utf8');
@@ -14,10 +15,14 @@ const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Cont
 export async function operations(req,url,db){
  const auth=await adminAuth(req,url);if(auth)return auth;
  if(url.pathname==='/ops/debug')return new Response(debugPage,{headers:{...privateHeaders,'Content-Type':'text/html;charset=utf-8'}});
+ if(url.pathname.startsWith('/api/admin/debug-space/')){
+  if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
+  return debugSpace(new Request(url,{method:req.method||'GET'}));
+ }
  if(url.pathname==='/api/admin/debug-chat'){
   if(!authorized(req.headers.cookie))return json({error:'Not found'},404);
   if(req.method!=='GET')return json({},405);
-  return new Response((await initialPage(db,'/GANGZIIII')).replace('</html>','<script>'+debugChatScript+'</script></html>'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer'}});
+  return new Response((await initialPage(db,'/GANGZIIII')).replace("const realtimeOrigin='';",()=> 'let realtimeOrigin='+JSON.stringify(process.env.SPACELIVE_REALTIME_ORIGIN||'').replace(/</g,'\\u003c')+';').replace('</html>','<script>'+debugChatScript+'</script></html>'),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer'}});
  }
  if(url.pathname==='/ops')return new Response(page.replace('__DEBUG_PATH__','/ops/debug'),{headers:{...privateHeaders,'Content-Type':'text/html;charset=utf-8'}});
  if(url.pathname==='/api/feedback')return receiveFeedback(req,url,db);

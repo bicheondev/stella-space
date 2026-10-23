@@ -365,12 +365,12 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
     let id = String(input || ''), postId = null;
     if (/^https?:/.test(id)) {
       const url = new URL(id);
-      if (!['x.com','www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)) throw Error('X URL을 입력해 주세요.');
+      if (!['x.com','www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)) throw Object.assign(Error('X URL을 입력해 주세요.'),{status:400,code:'INVALID_SPACE_URL'});
       postId = url.pathname.match(/\/status\/(\d{2,20})(?:\/|$)/)?.[1] || null;
       id = url.pathname.match(/\/i\/spaces\/([A-Za-z0-9]+)/)?.[1] || '';
     }
     const state = [...members.values()].map(member => member.retained).find(value => value && (postId ? postIdOf(value) === postId : value.space === id));
-    if (!state) throw Error('아직 수집되지 않은 방송입니다.');
+    if (!state) throw Object.assign(Error('운영 수집 대상이 아닌 방송입니다. 외부 Space는 운영 콘솔의 디버깅 URL 테스트에서 연결해 주세요.'),{status:404,code:'UNTRACKED_SPACE'});
     return {id: state.space, tweet: postIdOf(state), handle: state.handle, title: state.title, avatar: state.avatar, state: state.state, startedAt: state.startedAt, currentParticipants: state.currentParticipants};
   }
   return {initialize, step, ingestPosts, snapshot, room, resolve, stop() { stopped = true; abort.abort(); }, async settled() { await Promise.allSettled([...pending]); }};
