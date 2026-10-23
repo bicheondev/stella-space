@@ -44,7 +44,7 @@ function setup({ended = false, history = [], known = true} = {}) {
     onMembers: states => members.push(states), onBroadcast: event => broadcasts.push(event),
   });
   return {collector, sqlite, db, urls, events, members, broadcasts, writes: () => writes, reads: () => reads,
-    advance(ms) { clock += ms; }, setReplies(value) { replies = value; }, setAudience(value) { audience = value; }, setMetadata(value) { metadataState = value; }, failMetadata() { metadataFails = true; }, failProfiles() { profileFails = true; }, limitReplies() { conversationStatus = 429; }, holdReplies(value) { holdReplies = value; },
+    advance(ms) { clock += ms; }, setReplies(value) { replies = value; }, setAudience(value) { audience = value; }, setMetadata(value) { metadataState = value; }, failMetadata() { metadataFails = true; }, failProfiles() { profileFails = true; }, restoreProfiles() { profileFails = false; }, limitReplies() { conversationStatus = 429; }, holdReplies(value) { holdReplies = value; },
     async cycle() { collector.step(); await collector.settled(); }, close() { collector.stop(); sqlite.close(); },
   };
 }
@@ -214,4 +214,16 @@ test('retired room caches are released while durable archives remain readable af
   assert.equal((await resumed.room(postId)).messages[0].id,'1001');
   assert.equal((await resumed.room('222',{before:100000})).messages[0].id,'2000');
   resumed.stop(); f.sqlite.close();
+});
+
+test('failed profile audits retry before the healthy five-minute interval without declaring offline',async()=>{
+ const f=setup({known:false});try{
+  f.failProfiles();await f.collector.initialize();await f.cycle();
+  const attempts=f.urls.filter(u=>u.includes('/2/profile/')).length;
+  assert.equal(f.collector.snapshot()[0].status,'unknown');
+  f.advance(31000);await f.cycle();
+  assert(f.urls.filter(u=>u.includes('/2/profile/')).length>attempts,'retry after 30s rather than waiting 5 minutes');
+  assert.equal(f.collector.snapshot()[0].status,'unknown');
+  f.restoreProfiles();f.advance(61000);await f.cycle();assert.equal(f.collector.snapshot()[0].status,'live');
+ }finally{f.close();}
 });

@@ -159,3 +159,22 @@ The underlying push does not identify a post, so correlation is a candidate,
 not proof of a per-post push delivery time. Normal fallback schedules remain
 unchanged so comparisons measure real operating conditions. Markers expire
 with the 30-day audit retention.
+
+## Provider recovery incident (2026-10-23)
+
+Authenticated, fixed-target diagnostics from the CF gateway observed FxTwitter
+HTTP 429/plain-text `error code: 1015` with Retry-After. Carryfeed returned 500
+and explicitly reported an FxTwitter 429 dependency. A later check returned
+200 for both: the outage was intermittent, not proof of a permanent CF block.
+At 21:08–21:16 KST, production logs show successful Fx timelines for 8 handles
+and failed Fx timelines for 7 other handles. Carry recovered two; a retained
+Ended Space independently verified another. Four handles correctly became
+unknown rather than being falsely declared offline.
+
+Recovery no longer inherits the healthy five-minute audit interval: failures
+retry after 30s, 60s, 120s, 240s, then 300s, subject to the provider-wide
+Retry-After/cooldown. Only FX profile requests get an extra 200ms launch spacing;
+conversation polling and push processing cadences are unchanged. Safe private
+provider status/retry audit events aid future diagnosis. Temporary provider
+probe endpoints were removed. This improves client recovery; it does not claim
+to eliminate third-party rate limits or make Carryfeed an independent backend.

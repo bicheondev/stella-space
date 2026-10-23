@@ -21,7 +21,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
   if (!db?.prepare) throw Error('공유 수집 저장소가 연결되지 않았습니다.');
   const members = new Map(handles.map(handle => [handle, {state: {handle, status: 'unknown'}, retained: null, posts: [], sources: {}, due: 0, pending: null, dirty: false, fetchCount: 0}]));
   const rooms = new Map(), metadataCache = new Map(), pending = new Set(), providerPause = {fx: 0, carry: 0}, providerSlots = {fx: 0, carry: 0};
-  const abort = new AbortController();
+  const abort = new AbortController();let timelineSlot=0;
   let initialized = false, initialization, stopped = false, guest = null, guestUntil = 0, guestPending = null, healthDue = 0, healthPending = null, ingestion = Promise.resolve();
   const iso = () => new Date(now()).toISOString();
   const emit = async (callback, value) => { try { await callback(value); } catch (error) { if (callback !== onError) try { await onError({key: 'delivery', error: error.message, at: now()}); } catch {} } };
@@ -48,6 +48,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
     if (!response.ok || Number(data?.code) === 429) {
       const status = Number(data?.code) === 429 ? 429 : response.status;
       const error = Object.assign(Error('외부 조회 오류 (' + status + ') · ' + new URL(url).pathname), {status});
+      onEvent('provider.failed',{source:provider||new URL(url).hostname,code:status});
       const after = response.headers.get('retry-after'), seconds = Number(after), reset = Number(response.headers.get('x-rate-limit-reset')) * 1000;
       error.retryAt = Math.max(after && Number.isFinite(seconds) ? now() + seconds * 1000 : Date.parse(after) || 0, reset || 0);
       if (status === 429 && provider) {
@@ -109,6 +110,7 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
       if (entry.next > now()) { if (entry.error) warnings.push(entry.error); continue; }
       try {
         const base = source === 'fx' ? 'https://api.fxtwitter.com/2/profile/' : 'https://api.carryfeed.com/api/profile/';
+        if(source==='fx'){const slot=Math.max(now(),timelineSlot);timelineSlot=slot+200;if(slot>now())await sleep(slot-now(),abort.signal);}
         const data = await request(base + handle + '/statuses?count=5', {}, source);
         if (data.code !== 200 || !Array.isArray(data.results)) throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
         for(const post of data.results)if(/^\d{2,20}$/.test(post.id||'')&&post.author?.screen_name?.toLowerCase()===handle.toLowerCase())onEvent('post.observed',{handle,postId:post.id,source:'timeline-'+source,postedAt:Number(post.created_timestamp)*1000,observedAt:now()});
@@ -116,8 +118,8 @@ export function createCollector({db, fetcher = fetch, now = Date.now, sleep = pa
         return {posts: combinePosts(member.posts, entry.posts), source: member.posts.length ? 'x-notifications' : source, fresh: true};
       } catch (error) {
         if (!error.deferred) entry.failures++;
-        entry.error = error.message; entry.next = Math.max(error.retryAt || 0, now() + (error.deferred ? 1000 : Math.max(audit, Math.min(300000, 30000 * 2 ** Math.min(entry.failures - 1, 4)))));
-        warnings.push(error.message); report('timeline:' + source + ':' + handle, error);
+        entry.error = error.message; entry.next = Math.max(error.retryAt || 0, now() + (error.deferred ? 1000 : Math.min(300000, 30000 * 2 ** Math.min(entry.failures - 1, 4))));
+        if(!error.deferred)onEvent('timeline.retry-scheduled',{handle,source,code:error.status||'request_failed',retryAt:entry.next});warnings.push(error.message); report('timeline:' + source + ':' + handle, error);
       }
     }
     return {posts: combinePosts(member.posts, feed?.posts || []), source: member.posts.length ? 'x-notifications' : feed?.source, fresh: false, warning: warnings.join(' · ') || '게시물 조회 대기 중'};
