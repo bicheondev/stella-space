@@ -1,3 +1,4 @@
+import{broadcastWebhook}from'../server/broadcast-webhook.js';
 const members=[['','',[['강지','GANGZIIII']]],['에버리스','EVERYS',[['아야츠노 유니','AyatsunoYuni'],['사키하네 후야','SakihaneHuya']]],['유니버스','UNIVERSE',[['네네코 마시로','NenekoMashiro'],['아라하시 타비','ArahashiTabi'],['시라유키 히나','ShirayukiHina_'],['아카네 리제','AkaneLize']]],['클리셰','CLICHÉ',[['아오쿠모 린','AokumoRin'],['텐코 시부키','TenkoShibuki'],['하나코 나나','HanakoNana_'],['유즈하 리코','YuzuhaRiko']]],['어비스','ABYSS',[['시즈키 토아','ShizukiToa_'],['코가네 랑','CoganeRang'],['하나요 히요리','HanayoHiyori'],['토키노 메리','TokinoMary']]]];
 export const memberNames=Object.fromEntries(members.flatMap(g=>g[2]).map(([name,handle])=>[handle.toLowerCase(),name]));
 export const memberHandles=members.flatMap(g=>g[2]).map(m=>m[1]);
@@ -50,10 +51,11 @@ export function findSpacePost(posts,handle){
 export async function rememberBroadcast(db,value,startedAt){
  const postId=value.postUrl?.match(/\/status\/(\d{2,20})/)?.[1];
  if(!postId||!value.space||!['Running','Ended'].includes(value.state))return await retainedBroadcast(db,value.handle)||value;
+ const previous=await retainedBroadcast(db,value.handle);
  await db.prepare(`INSERT INTO broadcast_sessions (handle,post_id,space_id,started_at,payload) VALUES (?1,?2,?3,?4,?5)
  ON CONFLICT(handle) DO UPDATE SET post_id=excluded.post_id,space_id=excluded.space_id,started_at=excluded.started_at,payload=excluded.payload
  WHERE excluded.started_at>=broadcast_sessions.started_at`).bind(value.handle,postId,value.space,startedAt||0,JSON.stringify(value)).first();
- return await retainedBroadcast(db,value.handle)||value;
+ const current=await retainedBroadcast(db,value.handle)||value;try{await broadcastWebhook(db,previous,current,memberNames[value.handle.toLowerCase()]||value.handle)}catch{}return current;
 }
 async function retainedBroadcast(db,handle){const row=await db.prepare('SELECT payload FROM broadcast_sessions WHERE handle=?1').bind(handle).first();return row?JSON.parse(row.payload):null;}
 export async function archiveMessages(db,postId,messages){

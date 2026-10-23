@@ -6,3 +6,4 @@ DROP TABLE IF EXISTS visitor_daily;
 CREATE TABLE IF NOT EXISTS operations_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback_messages(id TEXT PRIMARY KEY,created_at INTEGER NOT NULL,message TEXT NOT NULL,member TEXT,delivery TEXT NOT NULL DEFAULT 'pending',error TEXT,attempted_at INTEGER,urgent INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS feedback_limits(key TEXT PRIMARY KEY,bucket INTEGER NOT NULL,used INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS broadcast_notifications(id TEXT PRIMARY KEY,content TEXT NOT NULL,status TEXT NOT NULL,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT);
