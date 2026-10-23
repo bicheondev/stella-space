@@ -1,3 +1,4 @@
+import {timingLines} from '../worker/post-timing.js';
 import{encryptToken,decryptToken}from'./visitor-analytics.js';
 const setting='broadcast_webhook';
 export async function saveBroadcastWebhook(db,url,{fetcher=fetch}={}){const u=new URL(url);if(u.origin!=='https://discord.com'||u.search||u.hash||!/^\/api\/webhooks\/\d{15,22}\/[A-Za-z0-9_-]+$/.test(u.pathname))throw Error('Discord 웹훅 주소를 확인해 주세요.');await send(u.href,'스페라이브 방송 시작·종료 알림 웹훅이 연결되었습니다.',fetcher);await db.prepare('INSERT INTO operations_settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key').bind(setting,encryptToken(u.href)).first();}
@@ -5,7 +6,21 @@ async function send(url,content,fetcher){const r=await fetcher(url+'?wait=true',
 export async function broadcastWebhook(db,previous,current,name,{fetcher=fetch,now=Date.now()}={}){
  const config=await db.prepare('SELECT value FROM operations_settings WHERE key=?1').bind(setting).first();if(!config)return;
  const started=current.state==='Running'&&(!previous||previous.space!==current.space),ended=current.state==='Ended'&&previous?.space===current.space&&previous.state==='Running';
- if(started||ended){const event=current.space+':'+(started?'start':'end'),text=name+(started?'의 방송이 시작되었습니다!':'의 방송이 종료되었습니다.')+'\nhttps://spacelive.vercel.app/'+encodeURIComponent(current.handle);await db.prepare("INSERT INTO broadcast_notifications(id,content,status,next_attempt) VALUES(?1,?2,'pending',0) ON CONFLICT(id) DO NOTHING RETURNING id").bind(event,text).first();}
+ if(started||ended){const event=current.space+':'+(started?'start':'end'),text=name+(started?'의 방송이 시작되었습니다!':'의 방송이 종료되었습니다.')+(current.postTiming?'\n'+timingLines(current.postTiming):'')+'\nhttps://spacelive.vercel.app/'+encodeURIComponent(current.handle);await db.prepare("INSERT INTO broadcast_notifications(id,content,status,next_attempt) VALUES(?1,?2,'pending',0) ON CONFLICT(id) DO NOTHING RETURNING id").bind(event,text).first();}
  const pending=(await db.prepare("SELECT id FROM broadcast_notifications WHERE status!='sent' AND next_attempt<=?1 ORDER BY rowid LIMIT 3").bind(now).all()).results;
  for(const row of pending){const claim=await db.prepare("UPDATE broadcast_notifications SET status='sending',next_attempt=?2 WHERE id=?1 AND status!='sent' AND next_attempt<=?3 RETURNING content").bind(row.id,now+60000,now).first();if(!claim)continue;try{await send(decryptToken(config.value),claim.content,fetcher);await db.prepare("UPDATE broadcast_notifications SET status='sent',last_error=NULL WHERE id=?1 RETURNING id").bind(row.id).first();}catch(e){await db.prepare("UPDATE broadcast_notifications SET status='pending',last_error=?2 WHERE id=?1 RETURNING id").bind(row.id,e.message).first();}}
+ return{mayHaveMore:pending.length===3};
+}
+
+// Reuse the durable outbox and existing webhook. Insertion only: Discord I/O
+// is drained independently of inbox ingestion and chat collection.
+export async function enqueuePostNotifications(db,posts,{notBefore=Infinity,names={}}={}){
+ if(!Number.isFinite(notBefore))return 0;
+ const eligible=posts.filter(p=>/^\d{2,20}$/.test(p.id||'')&&Number.isFinite(p.timing?.postedAt)&&p.timing.postedAt>=notBefore);
+ if(!eligible.length)return 0;
+ const config=await db.prepare('SELECT value FROM operations_settings WHERE key=?1').bind(setting).first();if(!config)return 0;
+ let queued=0;for(const post of eligible){const handle=post.author?.screen_name,name=names[handle?.toLowerCase()];if(!name)continue;
+  const content=name+'의 새 게시물\n'+timingLines(post.timing)+'\nhttps://x.com/'+encodeURIComponent(handle)+'/status/'+post.id;
+  const row=await db.prepare("INSERT INTO broadcast_notifications(id,content,status,next_attempt) VALUES(?1,?2,'pending',0) ON CONFLICT(id) DO NOTHING RETURNING id").bind('post:'+post.id,content).first();if(row)queued++;
+ }return queued;
 }

@@ -328,3 +328,10 @@ test('Web Push budgets its native connection and uses injected headers and fetch
   assert.deepEqual(calls, ['https://x.com/i/api/1.1/notifications/settings/login.json']);
   client.close();
 });
+
+test('notification delivery failures are isolated and push observations retain their own trigger time',async()=>{
+ const observations=[],events=[];const f=fixture({onObservedPosts:async posts=>{observations.push(posts);throw Error('Discord delivery unavailable');},onEvent:(kind,payload)=>events.push({kind,payload})});
+ try{await step(f.receiver);assert.equal(f.calls.posts.length,1);assert.equal(f.receiver.status().error,null);f.advance(1234);await f.calls.opens[0].onNotification();await f.receiver.idle();
+ const observed=events.filter(e=>e.kind==='post.observed');assert.equal(observed[0].payload.source,'fallback-inbox');assert.equal(observed.at(-1).payload.source,'push-inbox');assert.equal(observed.at(-1).payload.pushReceivedAt,101234);assert.equal(observed.at(-1).payload.pushDetectedAt,101234);assert.equal(f.receiver.status().error,null);assert.equal(f.calls.posts.length,1);assert.equal(observations.length,2);
+ }finally{await f.receiver.stop()}
+});

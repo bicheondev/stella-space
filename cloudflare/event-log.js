@@ -1,5 +1,5 @@
 // Durable audit trail: metadata only, never cookies, tokens, message bodies or headers.
-const FIELDS=new Set(['handle','space','postId','source','status','state','previousStatus','previousState','startedAt','endedAt','postedAt','durationMs','count','fromPush','observedAt','retryAt','pushReceivedAt','code','key']);
+const FIELDS=new Set(['handle','space','postId','source','status','state','previousStatus','previousState','startedAt','endedAt','postedAt','durationMs','count','fromPush','observedAt','retryAt','pushReceivedAt','pushDetectedAt','postedAtKst','detectedAtKst','code','key']);
 export function createEventLog(storage,{now=Date.now}={}){
  const sql=storage.sql;let queue=[],lastPrune=0,dropped=0;
  if(sql)sql.exec('CREATE TABLE IF NOT EXISTS diagnostic_events (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL)');

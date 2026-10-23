@@ -10,7 +10,7 @@ const source=await build({entryPoints:['cloudflare/worker.js'],bundle:true,write
     './collector.js':`export const createCollector=()=>({initialize:async()=>{},step(){globalThis.__steps++;return 1000},stop(){},settled:async()=>{},snapshot:()=>[{handle:'GANGZIIII',status:'offline'}],room:async(id,opts)=>({postId:id,...opts,messages:[]}),resolve:async()=>({tweet:'123'})});`,
     './notifications.js':'export const createNotificationReceiver=()=>({step:async()=>{},stop:async()=>{},status:()=>({})});',
     './hub.js':'export const createHub=()=>({broadcastMembers(){},publishRoom(){},accept(){},handle(){},remove(){}});',
-    '../server/broadcast-webhook.js':'export const broadcastWebhook=async()=>{};',
+    '../server/broadcast-webhook.js':'export const broadcastWebhook=async()=>{};export const enqueuePostNotifications=async()=>0;',
   }[path]}));
 }}]});
 const {default:gateway,SpaceliveCoordinator}=await import('data:text/javascript;base64,'+Buffer.from(source.outputFiles[0].text).toString('base64'));

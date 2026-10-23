@@ -7,7 +7,8 @@ import {createCollector} from './collector.js';
 import {createNotificationReceiver} from './notifications.js';
 import {createHub} from './hub.js';
 import {createRequestBudget} from './request-budget.js';
-import {broadcastWebhook} from '../server/broadcast-webhook.js';
+import {broadcastWebhook,enqueuePostNotifications} from '../server/broadcast-webhook.js';
+import {memberNames} from '../worker/index.js';
 
 const PUBLIC_ROUTES = new Set(['/api/members','/api/member','/api/resolve','/api/replies','/api/chat-history','/api/live','/health']);
 const CONTROL_ROUTES = new Set(['/control/status','/control/events','/control/reply-probe','/control/start','/control/stop','/control/retire-previous','/control/debug/resolve','/control/debug/replies','/control/debug/chat-history']);
@@ -81,7 +82,7 @@ export class SpaceliveCoordinator extends DurableObject {
         notificationHealth:()=>this.receiver?.status() || {},
       });
       await this.collector.initialize();
-      this.receiver=createNotificationReceiver({onEvent:(kind,data)=>this.events.record(kind,data),db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
+      this.receiver=createNotificationReceiver({onEvent:(kind,data)=>this.events.record(kind,data),db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onObservedPosts:async posts=>{const queued=await enqueuePostNotifications(this.db,posts,{notBefore:Date.parse(this.env.POST_TIMING_SINCE||''),names:memberNames});if(queued)this.retryWebhookAt=0;},onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
       this.ready=true;
     })().catch(error=>{this.boot=null;this.lastError='Initialization failed';throw error;});
     return this.boot;
@@ -117,7 +118,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }
     if (!this.webhookPending && Date.now()>=this.retryWebhookAt) {
       this.retryWebhookAt=Date.now()+60000;
-      this.webhookPending=broadcastWebhook(this.db,null,{},'',{fetcher:this.fetcher}).catch(error=>this.recordError({key:'cloudflare:webhook',error:error.message})).finally(()=>{this.webhookPending=null;});
+      this.webhookPending=broadcastWebhook(this.db,null,{},'',{fetcher:this.fetcher}).then(result=>{if(result?.mayHaveMore)this.retryWebhookAt=Date.now()+1000;}).catch(error=>this.recordError({key:'cloudflare:webhook',error:error.message})).finally(()=>{this.webhookPending=null;});
       this.ctx.waitUntil(this.webhookPending);
     }
     this.timer=setTimeout(()=>{this.timer=null;this.kick();},Math.max(100,delay));
@@ -193,7 +194,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'vercel-replies-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'post-timing-20261023',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,postTiming:{enabled:!!this.env.POST_TIMING_SINCE,since:this.env.POST_TIMING_SINCE||null},notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}

@@ -208,3 +208,21 @@ CPU, memory and shared account usage using actual production metrics.
 `GET /control/reply-probe?id=<post ID>` exercises the same relay without adding
 the external post to the roster or chat archive; it requires the control bearer
 and counts against the same safety allocation.
+
+## Post detection timestamps and Discord
+
+For each first `post.observed` per source, diagnostics retain the X Snowflake
+creation timestamp (`postedAt`), first observation (`observedAt`), KST strings,
+and, for push-triggered scans, `pushDetectedAt` and the triggering
+`pushReceivedAt`. The latter is not a post-ID-correlated raw push timestamp;
+`pushDetectedAt` means the post was first confirmed in a push-triggered inbox
+response. Queued pushes keep their own trigger time instead of borrowing a newer
+push received while an earlier HTTP request was in progress.
+
+`POST_TIMING_SINCE` is the explicit deployment cutoff for general-post Discord
+notifications. Earlier posts are not replayed on reconnect. New posts reuse the
+existing encrypted `broadcast_webhook` and durable `broadcast_notifications`
+outbox, deduplicated by post ID. KST creation and detection times are shown to
+seconds; fallback-inbox observations are labeled as polling, never as push.
+Sending is asynchronous to chat ingestion. Existing broadcast start/end alerts
+also include post timing when available. No extra X polling is introduced.

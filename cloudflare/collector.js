@@ -1,3 +1,4 @@
+import {postCreatedAt} from '../worker/post-timing.js';
 import {memberUserIds} from '../worker/member-user-ids.js';
 import {memberHandles, memberNames, findSpacePost, decideSpaceStatus, parseFxReplies, currentParticipants, replyInterval, broadcastHistory, recentBroadcastHistory} from '../worker/index.js';
 
@@ -115,7 +116,7 @@ export function createCollector({db, fetcher = fetch, replyFetcher = null, now =
         const account=source==='fx'&&memberUserIds[handle]?'id:'+memberUserIds[handle]:handle;
         const data = await request(base + account + '/statuses?count=5', {}, source);
         if (data.code !== 200 || !Array.isArray(data.results)) throw Error('멤버 게시물 응답을 읽을 수 없습니다.');
-        for(const post of data.results)if(/^\d{2,20}$/.test(post.id||'')&&post.author?.screen_name?.toLowerCase()===handle.toLowerCase())onEvent('post.observed',{handle,postId:post.id,source:'timeline-'+source,postedAt:Number(post.created_timestamp)*1000,observedAt:now()});
+        for(const post of data.results)if(/^\d{2,20}$/.test(post.id||'')&&post.author?.screen_name?.toLowerCase()===handle.toLowerCase())onEvent('post.observed',{handle,postId:post.id,source:'timeline-'+source,postedAt:postCreatedAt(post),observedAt:now()});
         onEvent('timeline.fetched',{handle,source,count:data.results.length});entry.posts = data.results; entry.at = now(); entry.failures = 0; entry.error = null; entry.next = now() + audit;
         return {posts: combinePosts(member.posts, entry.posts), source: member.posts.length ? 'x-notifications' : source, fresh: true};
       } catch (error) {
@@ -207,7 +208,7 @@ export function createCollector({db, fetcher = fetch, replyFetcher = null, now =
       const link = findSpacePost(feed.posts, handle);
       const candidate = link?.space === prior?.space ? previous : link?.space ? await spaceMetadata(link.space) : null;
       const avatar = feed.posts.find(post => post.author?.screen_name?.toLowerCase() === handle.toLowerCase())?.author?.avatar_url || prior?.avatar || member.state.avatar;
-      const found = link ? {handle, avatar, space: link.space, postUrl: 'https://x.com/' + handle + '/status/' + link.post.id, title: candidate?.title || memberNames[handle.toLowerCase()] + '의 스페이스'} : null;
+      const found = link ? {handle, avatar, space: link.space, postUrl: 'https://x.com/' + handle + '/status/' + link.post.id, postTiming:link.post.timing||{postedAt:postCreatedAt(link.post),source:feed.source},title: candidate?.title || memberNames[handle.toLowerCase()] + '의 스페이스'} : null;
       const state = decideSpaceStatus({prior, found, candidate, previous, feedFresh: feed.fresh});
       const next = {...state, handle, avatar, discoverySource: feed.source || null, discoveryWarning: feed.warning || null, checkedAt: iso(), stateCheckedAt: state.authoritative ? iso() : null, stale: !state.authoritative && state.status === 'unknown'};
       if (stopped) return;
@@ -330,7 +331,7 @@ export function createCollector({db, fetcher = fetch, replyFetcher = null, now =
         if (!handle || !/^\d{2,20}$/.test(post.id || '') || typeof post.text !== 'string' || post.text.length > 30000) continue;
         const prior = changes.get(handle) || members.get(handle).posts;
         if (prior.some(value => value.id === post.id)) continue;
-        const clean = {id: post.id, text: post.text, created_timestamp: Number(post.created_timestamp) || 0, author: {screen_name: handle}, raw_text: {facets: []}};
+        const clean = {id: post.id, text: post.text, created_timestamp: Number(post.created_timestamp) || 0, author: {screen_name: handle}, raw_text: {facets: []},...(post.timing?{timing:post.timing}:{})};
         onEvent('post.received',{handle,postId:post.id,postedAt:clean.created_timestamp*1000,source:'x-notifications'});changes.set(handle,combinePosts([clean],prior)); accepted++;
       }
       for (const [handle,posts] of changes) {

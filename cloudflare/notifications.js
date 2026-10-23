@@ -1,3 +1,4 @@
+import {observePostTiming} from '../worker/post-timing.js';
 import {randomUUID} from 'node:crypto';
 import {openWebPush} from '../scripts/web-push.mjs';
 import {notificationPosts, syncFollowNotifications} from '../scripts/x-notifications.mjs';
@@ -29,7 +30,7 @@ async function writeFollowSetup(db, value) {
  * The Turso lease fences overlapping deployments and the previous Actions receiver.
  */
 export function createNotificationReceiver({
-  db, signal, onEvent=()=>{}, onPosts = async () => {}, onHealth = async () => {},
+  db, signal, onEvent=()=>{}, onPosts = async () => {}, onObservedPosts = async () => {}, onHealth = async () => {},
   waitUntil = () => {}, fetcher = fetch, now = Date.now,
   owner = randomUUID(), loadConfig = notificationConfig, control = webPushControl,
   openPush = openWebPush, headersFor = signedXHeaders, syncFollows = syncFollowNotifications,
@@ -45,7 +46,8 @@ export function createNotificationReceiver({
   let lastHealthAt = -Infinity, lastPushAt = null, lastScanAt = null, postsReceived = 0;
   let connectFailures = 0, scanFailures = 0, dirty = false, followSetup = null;
   let stepPending = null, scanPending = null, connectPending = null, followPending = null, healthPending = null;
-  let stopPending = null;
+  let stopPending = null, queuedPushAt = null;
+  const observedSources=new Set(),observationsPending=new Set(),observedTimings=new Map();
   const lifetime = new AbortController(), pending = new Set(), seen = new Set();
   const buildHeaders = headersFor === signedXHeaders ? createXHeaderSigner({fetcher, now, signal: lifetime.signal}) : headersFor;
   const active = token => !stopped && owned && token === epoch && now() < leaseUntil;
@@ -195,6 +197,7 @@ export function createNotificationReceiver({
     if (!active(epoch) || now() < nextScanAt && !fromPush) return Promise.resolve();
     // A rate-limit backoff also applies to incoming pushes.
     if (now() < scanRetryAt) return Promise.resolve();
+    if(fromPush)queuedPushAt=lastPushAt;
     if (scanPending) {
       if (fromPush) dirty = true;
       return scanPending;
@@ -205,6 +208,7 @@ export function createNotificationReceiver({
       let passes = 0;const scanStarted=now();
       do {
         dirty = false;
+        const triggerPushAt=queuedPushAt;queuedPushAt=null;
         if (!active(token)) return;
         try {
           const headers = await buildHeaders(selectedSession, 'GET', INBOX_PATH);
@@ -225,11 +229,18 @@ export function createNotificationReceiver({
           const data = await response.json();
           if (data.errors?.length) throw Error('알림함 조회 실패');
           const observedAt=now();
-          const allPosts=notificationPosts(data);
-          for(const post of allPosts)onEvent('post.observed',{handle:post.author?.screen_name,postId:post.id,source:fromPush?'push-inbox':'fallback-inbox',postedAt:Number(post.created_timestamp)*1000,observedAt,...(fromPush&&lastPushAt?{pushReceivedAt:lastPushAt}:{})});
+          const source=triggerPushAt!==null?'push-inbox':'fallback-inbox';
+          const allPosts=notificationPosts(data).map(post=>{const key=source+':'+post.id;let timing=observedTimings.get(key);if(!timing){timing=observePostTiming(post,{source,observedAt,pushReceivedAt:triggerPushAt});observedTimings.set(key,timing);}return{...post,timing};});
+          if(observedTimings.size>10000)for(const key of [...observedTimings.keys()].slice(0,5000))observedTimings.delete(key);
+          for(const post of allPosts)onEvent('post.observed',{handle:post.author?.screen_name,postId:post.id,...post.timing});
           const posts = allPosts.filter(post => !seen.has(post.id));
           if (!active(token)) return;
           if (posts.length) await onPosts(posts, {signal: scanSignal});
+          const observations=allPosts.filter(p=>!observedSources.has(source+':'+p.id)&&!observationsPending.has(source+':'+p.id));
+          if(observations.length){
+            const keys=observations.map(p=>source+':'+p.id);for(const key of keys)observationsPending.add(key);
+            track(Promise.resolve().then(()=>onObservedPosts(observations)).then(()=>{for(const key of keys)observedSources.add(key);if(observedSources.size>10000)for(const key of [...observedSources].slice(0,5000))observedSources.delete(key);}).catch(()=>onEvent('post.timing-delivery-failed',{source,count:observations.length})).finally(()=>{for(const key of keys)observationsPending.delete(key);}));
+          }
           if (!active(token)) return;
           for (const post of posts) seen.add(post.id);
           if (seen.size > 5000) {
@@ -238,7 +249,7 @@ export function createNotificationReceiver({
             for (const id of keep) seen.add(id);
           }
           postsReceived += posts.length;
-          lastScanAt = now();onEvent('inbox.scanned',{fromPush,count:posts.length,durationMs:now()-scanStarted});
+          lastScanAt = now();onEvent('inbox.scanned',{fromPush:source==='push-inbox',count:posts.length,durationMs:now()-scanStarted});
           scanFailures = 0;
           scanRetryAt = 0;
           error = null;
