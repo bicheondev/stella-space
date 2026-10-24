@@ -1,5 +1,5 @@
 import {createDebugSession} from './debug-session.js';
-import {createVercelReplies} from './vercel-replies.js';
+import {createRepliesRelay} from './vercel-replies.js';
 export {SpaceliveDebug} from './debug-space.js';
 import {createEventLog} from './event-log.js';
 import {DurableObject} from 'cloudflare:workers';
@@ -73,7 +73,9 @@ export class SpaceliveCoordinator extends DurableObject {
       this.budget=createRequestBudget({onExhausted:()=>this.replenishSoon(),fetcher:async(...args)=>{this.metrics.upstream++;try{return await fetch(...args);}catch(error){this.metrics.upstreamErrors++;throw error;}}});
       const fetcher=this.fetcher=this.budget.fetch;
       this.db?.close();this.db=createDatabase(this.env,{fetcher});
-      this.replyRelay=this.env.REPLIES_ORIGIN?createVercelReplies({origin:this.env.REPLIES_ORIGIN,secret:this.env.COLLECTOR_SECRET,storage:this.ctx.storage,fetcher,onEvent:(kind,data)=>this.events.record(kind,data)}):null;
+      const denoReplies=this.env.REPLIES_ORIGIN==='https://spacelive-fx-relay.bicheondev.deno.net';
+      const replyConfig={origin:this.env.REPLIES_ORIGIN,secret:denoReplies?this.env.DENO_RELAY_SECRET:this.env.COLLECTOR_SECRET,storage:this.ctx.storage,fetcher};
+      this.replyRelay=this.env.REPLIES_ORIGIN?createRepliesRelay({...replyConfig,...(denoReplies?{monthlyLimit:800000,budgetKey:'deno-replies-budget'}:{}),onEvent:(kind,data)=>this.events.record(kind,data)}):null;
       this.collector=createCollector({db:this.db,fetcher,replyFetcher:this.replyRelay?.fetch,
         onMembers:members=>this.hub.broadcastMembers(members),
         onMessages:data=>{this.metrics.newMessages+=data.messages.length;this.hub.publishRoom(data.postId);},
@@ -83,7 +85,7 @@ export class SpaceliveCoordinator extends DurableObject {
         notificationHealth:()=>this.receiver?.status() || {},
       });
       await this.collector.initialize();
-      this.debugReplyRelay=this.env.REPLIES_ORIGIN?createVercelReplies({origin:this.env.REPLIES_ORIGIN,secret:this.env.COLLECTOR_SECRET,storage:this.ctx.storage,fetcher,monthlyLimit:10000,budgetKey:'vercel-debug-replies-budget'}):null;
+      this.debugReplyRelay=this.env.REPLIES_ORIGIN?createRepliesRelay({...replyConfig,monthlyLimit:10000,budgetKey:denoReplies?'deno-debug-replies-budget':'vercel-debug-replies-budget'}):null;
       this.debugSession=createDebugSession({sql:this.ctx.storage.sql,fetcher,replyFetcher:this.debugReplyRelay?.fetch,production:this.collector,notificationHealth:()=>this.receiver?.status()||{}});
       this.receiver=createNotificationReceiver({onEvent:(kind,data)=>this.events.record(kind,data),db:this.db,signal:this.lifetime.signal,fetcher,beforeConnect:({signal})=>this.budget.reserve(signal),waitUntil:task=>this.ctx.waitUntil(task),onObservedPosts:async posts=>{const queued=await enqueuePostNotifications(this.db,posts,{notBefore:Date.parse(this.env.POST_TIMING_SINCE||''),names:memberNames});if(queued)this.retryWebhookAt=0;},onPosts:async posts=>{await this.collector.ingestPosts(posts);if(this.enabled)this.kick();}});
       this.ready=true;

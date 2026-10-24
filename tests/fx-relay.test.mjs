@@ -33,3 +33,12 @@ test('debug relay uses an independent bounded allocation without spending produc
  const values=new Map(),storage={get:async k=>values.get(k),put:async(k,v)=>values.set(k,v)},config={origin:'https://spacelive.vercel.app',secret:'s',storage,fetcher:async()=>Response.json({})};
  const debug=createVercelReplies({...config,budgetKey:'vercel-debug-replies-budget',monthlyLimit:1});await debug.fetch('https://api.fxtwitter.com/2/conversation/123');await assert.rejects(debug.fetch('https://api.fxtwitter.com/2/conversation/123'),/30일 안전 한도/);assert.equal(values.has('vercel-replies-budget'),false);const production=createVercelReplies({...config,monthlyLimit:2});await production.fetch('https://api.fxtwitter.com/2/conversation/123');assert.equal(production.status().used,1);
 });
+
+
+test('Deno and Vercel budgets are separate and only the approved fixed host is accepted',async()=>{
+ const values=new Map(),storage={get:async k=>values.get(k),put:async(k,v)=>values.set(k,v)},requests=[];
+ const config={origin:'https://spacelive-fx-relay.bicheondev.deno.net',secret:'deno-only',storage,monthlyLimit:800000,budgetKey:'deno-replies-budget',fetcher:async(url,init)=>{requests.push({url,init});return Response.json({code:200});}};
+ const relay=createVercelReplies(config);await relay.fetch('https://api.fxtwitter.com/2/conversation/123?ranking_mode=recency');
+ assert.equal(new URL(requests[0].url).origin,config.origin);assert.equal(requests[0].init.headers.authorization,'Bearer deno-only');assert.equal(relay.status().provider,'deno');assert.equal(values.has('vercel-replies-budget'),false);
+ assert.throws(()=>createVercelReplies({...config,origin:'https://evil.test'}),/Invalid reply relay/);
+});

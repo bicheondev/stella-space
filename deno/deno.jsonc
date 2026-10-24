@@ -1,0 +1,7 @@
+{
+  "deploy": {
+    "org":"bicheondev",
+    "app":"spacelive-fx-relay"
+  }
+}
+
