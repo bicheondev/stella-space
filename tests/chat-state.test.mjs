@@ -133,14 +133,26 @@ test('end rating is dismissible and shown only once per watched broadcast, with 
  vm.runInContext("closeBroadcastRating();showBroadcastRating('ShirayukiHina_','hina')",ctx);assert.equal(dialog.open,false);
  vm.runInContext("showBroadcastRating('ShirayukiHina_','hina2');ratingSession.score=4;selected='GANGZIIII'",ctx);
  let payload,calls=0;ctx.fetch=async(_url,options)=>{payload=JSON.parse(options.body);calls++;return{ok:true,json:async()=>({ok:true})}};
- await vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);
+ await vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);assert.equal(dialog.open,false);
  assert.equal(payload.member,'ShirayukiHina_');assert.equal(payload.space,'hina2');assert.equal(payload.rating,4);assert.equal(payload.postId,'123');assert.equal(elements.get('ratingSend').disabled,true);
  await vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);assert.equal(calls,1);
 });
 test('failed end rating can retry with the same submission ID',async()=>{
- const{ctx,elements}=await setup();ctx.document.querySelectorAll=()=>[];
+ const{ctx,elements}=await setup();ctx.document.querySelectorAll=()=>[];elements.set('ratingDialog',{close(){}});vm.runInContext('showRatingDeliveryError=()=>{}',ctx);
  vm.runInContext("ratingSession={handle:'ShirayukiHina_',space:'hina',id:'same-id',score:5,sending:false}",ctx);
  const ids=[];ctx.fetch=async(_url,options)=>{ids.push(JSON.parse(options.body).id);return{ok:ids.length>1,json:async()=>ids.length>1?{ok:true}:{error:'다시 시도'}}};
  await vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);assert.equal(elements.get('ratingSend').disabled,false);
  await vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);assert.deepEqual(ids,['same-id','same-id']);
+});
+
+test('confirm closes the rating dialog before delivery completes without showing a thank-you message',async()=>{
+ const{ctx,elements}=await setup();ctx.document.querySelectorAll=()=>[];
+ const dialog={open:true,close(){this.open=false}};elements.set('ratingDialog',dialog);
+ vm.runInContext("ratingSession={handle:'ShirayukiHina_',space:'hina',id:'same-id',score:5,sending:false}",ctx);
+ let resolve;ctx.fetch=()=>new Promise(r=>resolve=r);
+ const pending=vm.runInContext('submitBroadcastRating({preventDefault(){}})',ctx);
+ assert.equal(dialog.open,false);assert.equal(vm.runInContext('ratingSession.sending',ctx),true);
+ resolve({ok:true,json:async()=>({ok:true})});await pending;
+ assert.equal(elements.get('ratingStatus')?.textContent||'','');
+ assert.equal(vm.runInContext('ratingSession.sent',ctx),true);
 });
