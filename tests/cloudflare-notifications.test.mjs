@@ -343,3 +343,15 @@ test('a push arriving during a fallback scan does not relabel that response as a
  const fallback=observations.find(p=>p.id==='124'),triggered=observations.find(p=>p.id==='125');assert.equal(fallback.timing.source,'fallback-inbox');assert.equal(fallback.timing.pushReceivedAt,null);assert.equal(triggered.timing.source,'push-inbox');assert.equal(triggered.timing.pushReceivedAt,132000);
  }finally{release();await f.receiver.stop()}
 });
+
+test('disconnect diagnostics retain safe close metadata and preserve inbox fallback',async()=>{
+ const events=[],f=fixture({onEvent:(kind,payload)=>events.push({kind,payload})});
+ try{
+  await step(f.receiver);
+  f.calls.opens[0].onDisconnected({code:1006,durationMs:125750,wasClean:false,source:'socket-close',reason:'private-upstream-data'});
+  const event=events.find(e=>e.kind==='push.disconnected');
+  assert.deepEqual(event.payload,{code:1006,durationMs:125750,wasClean:false,source:'socket-close'});
+  assert.equal(f.receiver.status().pushConnected,false);assert.equal(f.receiver.status().mode,'polling');
+  f.advance(5000);await step(f.receiver);assert.ok(f.calls.fetch.length>=2);
+ }finally{await f.receiver.stop();}
+});

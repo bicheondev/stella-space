@@ -198,7 +198,7 @@ export class SpaceliveCoordinator extends DurableObject {
     }catch(error){if(['INVALID_SPACE_URL','UNTRACKED_SPACE'].includes(error.code))return json({error:error.message,code:error.code},error.status);console.error('Coordinator request failed:',error.message);return json({error:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'},503);}
   }
   status(privateView=false) {
-    return {revision:'production-debug-20261024',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,postTiming:{enabled:!!this.env.POST_TIMING_SINCE,since:this.env.POST_TIMING_SINCE||null},notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
+    return {revision:'push-keepalive-20261024',ready:this.ready,enabled:this.enabled,startedAt:this.startedAt,connections:this.ctx.getWebSockets().length,...(privateView?{metrics:this.metrics,budget:this.budget?.stats(),replyRelay:this.replyRelay?.status()||null,postTiming:{enabled:!!this.env.POST_TIMING_SINCE,since:this.env.POST_TIMING_SINCE||null},notification:this.receiver?.status() || null,lastError:this.lastError,members:this.collector?.snapshot() || []}:{})};
   }
   async webSocketMessage(socket,message) {await this.initialize();return this.hub.handle(socket,message);}
   webSocketClose(socket) {this.hub.remove(socket);}

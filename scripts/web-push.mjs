@@ -1,8 +1,7 @@
-import {AutopushClient,Decryptor} from 'xnotif';
+import {Decryptor} from 'xnotif';
+import {LeasedAutopushClient} from './autopush-client.mjs';
 import {randomUUID} from 'node:crypto';
 import {signedXHeaders} from '../server/x-notifications.js';
-// Reconnect only after renewing our server lease; the upstream auto-retry can outlive ownership.
-class LeasedAutopushClient extends AutopushClient{reconnect(){}}
 export const X_VAPID='BF5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs';
 export async function registerWebPush(session,state,decryptor,{fetcher=fetch,headersFor=signedXHeaders,signal}={}){
  const path='/1.1/notifications/settings/login.json';
@@ -17,7 +16,7 @@ export async function openWebPush({session,state,signal,onNotification,onDisconn
  let client;const close=()=>client?.close();
  client=new Client({uaid:state?.uaid,channelId,vapidKey:X_VAPID,remoteBroadcasts:state?.remoteBroadcasts,
  onNotification:async n=>{try{await decryptor.decrypt(n.headers.crypto_key,n.headers.encryption,Uint8Array.from(Buffer.from(n.data,'base64url')).buffer);await onNotification();}catch{onDisconnected('푸시 알림 해독 실패');}},
- onError:()=>onDisconnected('푸시 연결 오류'),onDisconnected:()=>{close();onDisconnected('푸시 재연결 중');}});
+ onError:()=>onDisconnected({source:'socket-error',...client?.diagnostics?.()}),onDisconnected:()=>{const details=client?.diagnostics?.()||{};close();onDisconnected({source:'socket-close',...details});}});
  // Channel ID must survive restarts together with the decryption keys.
  signal.addEventListener('abort',close,{once:true});
  let timer,abortReject;

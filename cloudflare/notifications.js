@@ -154,9 +154,14 @@ export function createNotificationReceiver({
             error = null;
             await requestScan(true);
           },
-          onDisconnected: () => {
+          onDisconnected: details => {
             if (!active(token) || connection !== current) return;
-            onEvent('push.disconnected');closePush();
+            const metadata={};
+            if(Number.isInteger(details?.code))metadata.code=details.code;
+            if(Number.isFinite(details?.durationMs)&&details.durationMs>=0)metadata.durationMs=details.durationMs;
+            if(typeof details?.wasClean==='boolean')metadata.wasClean=details.wasClean;
+            if(['socket-error','socket-close'].includes(details?.source))metadata.source=details.source;
+            onEvent('push.disconnected',metadata);closePush();
             mode = 'polling';
             error = '푸시 재연결 대기 · 알림함 보조 조회 중';
             nextConnectAt = now() + Math.min(60000, 1000 * 2 ** Math.min(connectFailures++, 6));
