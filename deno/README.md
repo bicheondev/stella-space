@@ -24,3 +24,9 @@ Rollback: restore `REPLIES_ORIGIN` to `https://spacelive.vercel.app` in
 `cloudflare/wrangler.jsonc` and deploy Cloudflare. The original Vercel endpoint,
 credentials and durable budget are retained. No automatic host rotation occurs
 on upstream 429; the existing collector respects Retry-After.
+
+## Service lifecycle
+
+Deno announced on 2026-10-09 that Deploy will shut down after six months:
+https://deno.com/blog/cloudflare . This relay is a temporary capacity bridge,
+not a permanent hosting commitment. Keep the Vercel rollback path available.

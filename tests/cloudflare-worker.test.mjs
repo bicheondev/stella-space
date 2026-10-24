@@ -67,3 +67,12 @@ test('private external debugging uses the existing coordinator, not another bill
  const response=await gateway.fetch(new Request(url,{headers:{Authorization:'Bearer '+env.COLLECTOR_SECRET}}),env);
  assert.equal(response.status,200);assert.deepEqual(await response.json(),{ok:true});assert.deepEqual(debugCalls,[]);assert.deepEqual(env.calls,['spacelive']);
 });
+
+test('Deno route uses its own secret and separate production and debug allocation',async()=>{
+ globalThis.WebSocketRequestResponsePair=class {};
+ const values=new Map();let initialized;
+ const ctx={storage:{get:async k=>values.get(k),getAlarm:async()=>null,put:async(k,v)=>values.set(k,v)},getWebSockets:()=>[],setWebSocketAutoResponse(){},blockConcurrencyWhile(fn){initialized=fn()},waitUntil(){}};
+ const object=new SpaceliveCoordinator(ctx,{REPLIES_ORIGIN:'https://spacelive-fx-relay.bicheondev.deno.net',DENO_RELAY_SECRET:'deno-only'});await initialized;await object.initialize();
+ assert.equal(object.replyRelay.status().provider,'deno');assert.equal(object.replyRelay.status().limit,800000);assert.equal(object.debugReplyRelay.status().limit,10000);
+ object.budget.close();
+});
