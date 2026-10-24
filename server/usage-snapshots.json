@@ -1,1 +1,40 @@
-{"version": 1, "providers": {"vercel": {"checkedAt": "2026-10-23T15:59:00Z", "source": "Vercel 대시보드 확인값 · 반올림 표시", "period": "rolling30", "metrics": {"cpuSeconds": 11520, "memoryGBh": 72.8, "invocations": 490000, "cdnRequests": 516101, "originTransferBytes": 840560000, "dataTransferBytes": 2020000000}}, "turso": {"checkedAt": "2026-10-23T15:02:00Z", "source": "Turso 대시보드 확인값", "period": "monthly", "metrics": {"rowsRead": 217512956, "rowsWritten": 631468, "storageBytes": 3060000}}}}
+{
+  "version": 1,
+  "providers": {
+    "vercel": {
+      "checkedAt": "2026-10-23T15:59:00Z",
+      "source": "Vercel 대시보드 확인값 · 반올림 표시",
+      "period": "rolling30",
+      "metrics": {
+        "cpuSeconds": 11520,
+        "memoryGBh": 72.8,
+        "invocations": 490000,
+        "cdnRequests": 516101,
+        "originTransferBytes": 840560000,
+        "dataTransferBytes": 2020000000
+      }
+    },
+    "turso": {
+      "checkedAt": "2026-10-24T03:02:00Z",
+      "source": "Turso 대시보드 확인값",
+      "period": "monthly",
+      "metrics": {
+        "rowsRead": 219202246,
+        "rowsWritten": 668828,
+        "storageBytes": 3690000
+      }
+    },
+    "cloudflare": {
+      "checkedAt": "2026-10-24T03:00:00Z",
+      "source": "Cloudflare 오늘 09:00–12:00 KST · DO 네임스페이스 · 대시보드 반올림값",
+      "period": "daily",
+      "approximate": true,
+      "metrics": {
+        "doRequests": 2000,
+        "durationGBs": 1000,
+        "rowsRead": 46000,
+        "rowsWritten": 2000
+      }
+    }
+  }
+}

@@ -7,8 +7,8 @@ test('rolling limits have no invented reset and preserve unknown usage instead o
 test('Cloudflare snapshots expire at UTC midnight without pretending that old usage reset to zero',()=>{
  const d=usageDashboard({providers:{cloudflare:{checkedAt:'2026-10-23T23:59:00Z',metrics:{durationGBs:12000}}}},Date.parse('2026-10-24T00:01:00Z'));assert.equal(d.providers[1].status,'expired');assert.equal(d.providers[1].metrics[2].used,null);assert.equal(d.providers[1].resetsAt,'2026-10-25T00:00:00.000Z');
 });
-test('Turso reset countdown is absent until a real period end is supplied',()=>{
- assert.equal(usageDashboard({providers:{}},now).providers[2].resetsAt,null);
+test('Turso uses the official UTC calendar-month estimate unless a confirmed end is supplied',()=>{
+ assert.equal(usageDashboard({providers:{}},now).providers[2].resetsAt,'2026-11-01T00:00:00.000Z');assert.equal(usageDashboard({providers:{}},now).providers[2].resetEstimated,true);
  const input=validateUsage({providers:{turso:{period:'monthly',checkedAt:new Date(now).toISOString(),resetsAt:'2026-11-01T00:00:00Z',metrics:{rowsRead:0}}}},now);const t=usageDashboard(input,now).providers[2];assert.equal(t.metrics[0].used,0);assert.equal(t.metrics[0].leftPercent,100);assert.equal(t.resetsAt,'2026-11-01T00:00:00.000Z');
 });
 test('snapshots reject forged periods, future times, invalid values and non-service targets',()=>{
@@ -28,3 +28,5 @@ test('usage edits require the owner session and same-origin POST',async()=>{
  const {operations}=await import('../server/operations.js');const {adminSessionCookie}=await import('../server/admin-auth.js');process.env.ADMIN_SESSION_SECRET='usage-edit-test-secret';
  const url=new URL('https://spacelive.vercel.app/api/admin/usage');assert.equal((await operations({method:'GET',headers:{}},url,null)).status,404);const cookie=adminSessionCookie().split(';')[0];assert.equal((await operations({method:'POST',headers:{cookie,origin:'https://other.example'}},url,null)).status,403);assert.equal((await operations({method:'DELETE',headers:{cookie}},url,null)).status,405);
 });
+
+test('monthly resets handle month-end and year rollover',()=>{for(const [at,end]of [['2026-10-31T23:59:59Z','2026-11-01T00:00:00.000Z'],['2026-12-31T23:59:59Z','2027-01-01T00:00:00.000Z']])assert.equal(usageDashboard({providers:{}},Date.parse(at)).providers[2].resetsAt,end);});
