@@ -30,3 +30,5 @@ test('usage edits require the owner session and same-origin POST',async()=>{
 });
 
 test('monthly resets handle month-end and year rollover',()=>{for(const [at,end]of [['2026-10-31T23:59:59Z','2026-11-01T00:00:00.000Z'],['2026-12-31T23:59:59Z','2027-01-01T00:00:00.000Z']])assert.equal(usageDashboard({providers:{}},Date.parse(at)).providers[2].resetsAt,end);});
+
+test('monthly rollover expires reads and writes but retains storage',()=>{const t=usageDashboard({providers:{turso:{checkedAt:'2026-10-31T23:59:00Z',metrics:{rowsRead:100,storageBytes:200}}}},Date.parse('2026-11-01T00:01:00Z')).providers[2];assert.equal(t.metrics[0].used,null);assert.equal(t.metrics[2].used,200);});
