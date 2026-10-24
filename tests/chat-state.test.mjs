@@ -98,6 +98,16 @@ test('theme and image preferences persist and preserve the current following sta
  assert.equal(ctx.document.documentElement.dataset.theme,'light');assert(classes.has('hide-chat-images'));assert.equal(box.scrollTop,300);assert.equal(vm.runInContext("localStorage.getItem('chatShowImages')",ctx),'0');
  ctx.matchMedia=()=>({matches:false});vm.runInContext("$('showImages').checked=true;auto=true;applyChatPreferences()",ctx);
  assert.equal(ctx.document.documentElement.dataset.theme,'dark');assert(!classes.has('hide-chat-images'));assert.equal(box.scrollTop,1500);
+ vm.runInContext("$('chatTheme').value='light';auto=false;applyChatPreferences()",ctx);
+ assert.equal(ctx.document.documentElement.dataset.theme,'light');
+ assert.equal(vm.runInContext("localStorage.getItem('chatTheme')",ctx),'light');
+ vm.runInContext("$('chatTheme').value='system';restoreChatTheme();applyChatPreferences()",ctx);
+ assert.equal(elements.get('chatTheme').value,'light');assert.equal(ctx.document.documentElement.dataset.theme,'light');
+ ctx.matchMedia=()=>({matches:true});vm.runInContext("$('chatTheme').value='dark';applyChatPreferences()",ctx);
+ assert.equal(ctx.document.documentElement.dataset.theme,'dark');
+ vm.runInContext("localStorage.setItem('chatTheme','invalid');restoreChatTheme();applyChatPreferences()",ctx);
+ assert.equal(elements.get('chatTheme').value,'system');assert.equal(ctx.document.documentElement.dataset.theme,'light');
+
 });
 
 test('avatars retain the last loaded photo, avoid same-URL reloads and ignore stale image completion',async()=>{
